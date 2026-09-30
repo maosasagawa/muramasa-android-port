@@ -134,6 +134,22 @@ void Window::DrawTextures(uint32_t Diff)
     glClear(GL_COLOR_BUFFER_BIT);
     for (Texture* pTex : Textures)
         pTex->Draw(Diff);
+    if (getenv("NP_TEX_DBG"))
+    {
+        static size_t Frame = 0;
+        ++Frame;
+        for (Texture* t : Textures)
+        {
+            const string& Handle = t->DebugName;
+            if (Handle.find("Config1a_TDir") == string::npos &&
+                Handle.find("Config1a_TateON") == string::npos &&
+                Handle.find("Config1a_YokoON") == string::npos)
+                continue;
+            fprintf(stderr, "[tex-draw] frame=%zu handle=%s priority=%d pos=%d,%d size=%dx%d alpha=%d visible=1\n",
+                    Frame, Handle.c_str(), t->GetPriority(),
+                    t->GetX(), t->GetY(), t->GetWidth(), t->GetHeight(), t->DebugAlpha());
+        }
+    }
     if (getenv("NP_DRAW_DBG"))
     {
         static int frames = 0;

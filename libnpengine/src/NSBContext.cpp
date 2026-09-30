@@ -20,6 +20,8 @@
 #include "scriptfile.hpp"
 #include "nsbconstants.hpp"
 #include <algorithm>
+#include <cstdlib>
+#include <cstdio>
 #include <ostream>
 
 NSBContext::NSBContext(const string& Name) : pText(nullptr), pObject(nullptr), Name(Name), WaitTime(0), Elapsed(0), WaitInterrupt(false), Active(false), FastForward(false)
@@ -195,9 +197,12 @@ void NSBContext::TryWake()
         Wake();
 }
 
-void NSBContext::OnClick()
+void NSBContext::OnClick(bool AdvanceText)
 {
-    if (WaitInterrupt || (pText && !pText->Advance()))
+    if (!AdvanceText && getenv("NP_EVENT_DBG"))
+        fprintf(stderr, "[event] modal click context=%s interrupt=%d text=%p\n",
+                Name.c_str(), WaitInterrupt, static_cast<void*>(pText));
+    if (WaitInterrupt || (AdvanceText && pText && !pText->Advance()))
         Wake();
 }
 

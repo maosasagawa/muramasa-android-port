@@ -21,6 +21,7 @@
 #include <vector>
 #include <cstring>
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
 
 #define STB_VORBIS_NO_PUSHDATA_API
@@ -168,6 +169,9 @@ void Playable::Stop()
     if (!Device)
     {
         Playing = false;
+        if (getenv("NP_SND_DBG"))
+            fprintf(stderr, "[snd] stop playable=%p bgm=%d playing=%d device=0\n",
+                    (void*)this, IsBGM, Playing);
         return;
     }
     SDL_LockAudioDevice(Device);
@@ -175,10 +179,15 @@ void Playable::Stop()
     for (auto i = Active.begin(); i != Active.end(); ++i)
         if (*i == this) { Active.erase(i); break; }
     SDL_UnlockAudioDevice(Device);
+    if (getenv("NP_SND_DBG"))
+        fprintf(stderr, "[snd] stop playable=%p bgm=%d playing=%d device=1\n",
+                (void*)this, IsBGM, Playing);
 }
 
 void Playable::StopAll()
 {
+    if (getenv("NP_SND_DBG"))
+        fprintf(stderr, "[snd] stop-all active=%zu device=%d\n", Active.size(), !!Device);
     if (!Device)
     {
         for (Playable* P : Active)
@@ -218,6 +227,9 @@ void Playable::Play()
     if (!Device)
     {
         Playing = true;
+        if (getenv("NP_SND_DBG"))
+            fprintf(stderr, "[snd] play playable=%p bgm=%d playing=%d vorbis=%d stream=%d device=0\n",
+                    (void*)this, IsBGM, Playing, !!Vorbis, !!Stream);
         return;
     }
     SDL_LockAudioDevice(Device);
@@ -231,6 +243,9 @@ void Playable::Play()
             Active.push_back(this);
     }
     SDL_UnlockAudioDevice(Device);
+    if (getenv("NP_SND_DBG"))
+        fprintf(stderr, "[snd] play playable=%p bgm=%d playing=%d vorbis=%d stream=%d device=1\n",
+                (void*)this, IsBGM, Playing, !!Vorbis, !!Stream);
 }
 
 void Playable::FeedStream()

@@ -27,6 +27,7 @@
 #include <jpeglib.h>
 #include <png.h>
 #include <new>
+#include <algorithm>
 
 Image::Image() : Format(-1), Width(0), Height(0), pPixels(0)
 {
@@ -91,6 +92,14 @@ void Image::LoadScreen(Window* pWindow)
     glReadBuffer(GL_BACK);
 #endif
     glReadPixels(0, 0, Width, Height, GL_RGBA, GL_UNSIGNED_BYTE, pPixels);
+    size_t RowBytes = static_cast<size_t>(Width) * 4;
+    for (int y = 0; y < Height / 2; ++y)
+    {
+        uint8_t* Top = pPixels + static_cast<size_t>(y) * RowBytes;
+        uint8_t* Bottom = pPixels + static_cast<size_t>(Height - 1 - y) * RowBytes;
+        for (size_t x = 0; x < RowBytes; ++x)
+            std::swap(Top[x], Bottom[x]);
+    }
 }
 
 uint8_t* Image::LoadPNG(uint8_t* pMem, uint32_t Size, uint8_t Format)

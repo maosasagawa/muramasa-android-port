@@ -18,6 +18,8 @@
 #include "Effect.hpp"
 #include "Window.hpp"
 #include "Image.hpp"
+#include <cstdio>
+#include <cstdlib>
 
 Texture::Texture() :
 pMove(nullptr),

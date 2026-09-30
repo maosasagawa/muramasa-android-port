@@ -127,6 +127,8 @@ void Text::SetCharacterSize(uint32_t Size)
 void Text::SetColor(uint32_t Color)
 {
     this->Color = Color;
+    if (!CurString.empty())
+        SetString(CurString);
 }
 
 void Text::SetWrap(int32_t Width)
@@ -176,6 +178,20 @@ void Text::SetString(const string& String)
     uint8_t* pData = FontRenderText(String.c_str(), Size, LayoutWidth, &W, &H, Vertical);
     if (!pData)
         return;
+    uint32_t RenderColor = Color ? Color : 0xFFFFFFFF;
+    uint8_t R = (RenderColor >> 16) & 0xFF;
+    uint8_t G = (RenderColor >> 8) & 0xFF;
+    uint8_t B = RenderColor & 0xFF;
+    uint8_t A = (RenderColor >> 24) & 0xFF;
+    size_t PixelCount = static_cast<size_t>(W) * H;
+    for (size_t i = 0; i < PixelCount; ++i)
+    {
+        size_t Pixel = i * 4;
+        pData[Pixel + 0] = R;
+        pData[Pixel + 1] = G;
+        pData[Pixel + 2] = B;
+        pData[Pixel + 3] = pData[Pixel + 3] * A / 255;
+    }
     Width = W;
     Height = H;
     Create(pData, GL_RGBA, Width, Height);

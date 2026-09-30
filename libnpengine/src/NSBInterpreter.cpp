@@ -46,6 +46,12 @@
 #define NSB_ERROR(MSG1, MSG2) cout << __PRETTY_FUNCTION__ << ": " << MSG1 << " " << MSG2 << endl;
 #define NSB_VARARGS 0xFF
 
+static void LogMissingScrollbar(const string& Handle)
+{
+    static set<string> LoggedHandles;
+    if (getenv("NP_TEX_DBG") && LoggedHandles.insert(Handle).second)
+        fprintf(stderr, "[scrollbar] missing handle=%s\n", Handle.c_str());
+}
 
 NSBInterpreter::NSBInterpreter(Window* pWindow) :
 pDebuggerThread(nullptr),
@@ -292,10 +298,8 @@ void NSBInterpreter::RunCommand()
         {
             if (getenv("NP_THR_DBG"))
             {
-                fprintf(stderr, "[thr] starve ctx=%p name=%s script=%s:%u threads=%zu\n",
-                        (void*)pContext, pContext->GetName().c_str(),
-                        pContext->GetScript() ? pContext->GetScript()->GetName().c_str() : "?",
-                        pContext->GetLineNumber(), Threads.size());
+                fprintf(stderr, "[thr] starve ctx=%p name=%s threads=%zu\n",
+                        (void*)pContext, pContext->GetName().c_str(), Threads.size());
             }
             ObjectHolder.Delete(pContext->GetName());
             RemoveThread(pContext);
@@ -314,7 +318,19 @@ void NSBInterpreter::Update(uint32_t Diff)
 
 void NSBInterpreter::PushEvent(const SDL_Event& Event)
 {
-    Events.push(Event);
+    for (auto i = EventOrder.rbegin(); i != EventOrder.rend(); ++i)
+    {
+        auto Queue = EventQueues.find(*i);
+        if (Queue != EventQueues.end())
+        {
+            Queue->second.push(Event);
+            if (getenv("NP_EVENT_DBG"))
+                fprintf(stderr, "[event] route type=%x target=%p name=%s script=%s selectors=%zu\n",
+                        Event.type, (void*)*i, (*i)->GetName().c_str(),
+                        (*i)->GetScriptName().c_str(), EventQueues.size());
+            return;
+        }
+    }
 }
 
 void NSBInterpreter::HandleEvent(const SDL_Event& Event)
@@ -328,10 +344,21 @@ void NSBInterpreter::HandleEvent(const SDL_Event& Event)
     switch (Event.type)
     {
     case SDL_MOUSEBUTTONDOWN:
+    {
         ProcessButton(Event.button.button, "true");
+        const bool ModalMenuActive =
+            GetBool("$SYSTEM_menu_save_enable") ||
+            GetBool("$SYSTEM_menu_load_enable") ||
+            GetBool("$SYSTEM_menu_config_enable") ||
+            GetBool("$SYSTEM_backlog_enable") ||
+            GetBool("$SYSTEM_menu_close_enable") ||
+            GetBool("$SYSTEM_reset_enable");
         for (auto pContext : Threads)
-            pContext->OnClick();
+            pContext->OnClick(!ModalMenuActive);
+        if (ModalMenuActive && getenv("NP_EVENT_DBG"))
+            fprintf(stderr, "[event] text advancement suppressed by modal menu\n");
         break;
+    }
     case SDL_MOUSEBUTTONUP:
         ProcessButton(Event.button.button, "false");
         break;
@@ -622,6 +649,13 @@ void NSBInterpreter::WhileEnd()
  * */
 void NSBInterpreter::Select()
 {
+    auto Inserted = EventQueues.emplace(pContext, queue<SDL_Event>());
+    if (Inserted.second)
+        EventOrder.push_back(pContext);
+    if (Inserted.second && getenv("NP_EVENT_DBG"))
+        fprintf(stderr, "[event] register ctx=%p name=%s script=%s threads=%zu selectors=%zu\n",
+                (void*)pContext, pContext->GetName().c_str(),
+                pContext->GetScriptName().c_str(), Threads.size(), EventQueues.size());
     pWindow->Select(true);
     if (SelectEvent())
         pContext->PushBreak();
@@ -635,8 +669,9 @@ void NSBInterpreter::SelectEnd()
 void NSBInterpreter::SelectBreakEnd()
 {
     pContext->PopBreak();
-    pWindow->Select(false);
-    Events = queue<SDL_Event>();
+    EventQueues.erase(pContext);
+    EventOrder.remove(pContext);
+    pWindow->Select(!EventQueues.empty());
 }
 
 void NSBInterpreter::Break()
@@ -962,10 +997,11 @@ void NSBInterpreter::Call(uint16_t Magic)
 
 bool NSBInterpreter::SelectEvent()
 {
-    if (!Events.empty())
+    auto i = EventQueues.find(pContext);
+    if (i != EventQueues.end() && !i->second.empty())
     {
-        Event = Events.front();
-        Events.pop();
+        Event = i->second.front();
+        i->second.pop();
         return true;
     }
     else
@@ -987,6 +1023,9 @@ void NSBInterpreter::AddThread(NSBContext* pThread)
 void NSBInterpreter::RemoveThread(NSBContext* pThread)
 {
     Threads.remove(pThread);
+    EventQueues.erase(pThread);
+    EventOrder.remove(pThread);
+    pWindow->Select(!EventQueues.empty());
     ThreadsModified = true;
 }
 
@@ -1049,7 +1088,11 @@ void NSBInterpreter::OnVariableChanged(const string& Name)
     if (Name == "#SYSTEM_window_full")
         pWindow->SetFullscreen(GetBool("#SYSTEM_window_full") ? SDL_WINDOW_FULLSCREEN : 0);
     else if (Name == "#SYSTEM_text_horizontal")
+    {
+        if (getenv("NP_TEX_DBG"))
+            fprintf(stderr, "[tex-mode] horizontal=%d\n", HorizontalText());
         RelayoutTextWindows();
+    }
     else if (Name == "$SYSTEM_menu_config_enable" && !GetBool("$SYSTEM_menu_config_enable"))
         SaveGlobals();
 }
@@ -1114,6 +1157,13 @@ void NSBInterpreter::ReadFile()
     string Filename = PopString();
     uint32_t Size;
     char* pData = fs::ReadFile(Filename, Size);
+    if (!pData)
+    {
+        if (getenv("NP_READFILE_DBG"))
+            fprintf(stderr, "[script] ReadFile missing %s\n", Filename.c_str());
+        PushString("");
+        return;
+    }
     NpaFile::Decrypt(pData, Size);
     PushString(NpaFile::ToUtf8(pData, Size));
     delete[] pData;
@@ -1150,6 +1200,7 @@ void NSBInterpreter::CreateTexture()
     pTexture->SourceFile = Source;
     pTexture->OrigX = TargetX;
     pTexture->OrigY = TargetY;
+    pTexture->DebugName = Handle;
     ApplyTextWindowMode(pTexture);
 
     if (getenv("NP_TEX_DBG"))
@@ -1157,7 +1208,6 @@ void NSBInterpreter::CreateTexture()
                 Handle.c_str(), Source.c_str(), Priority,
                 pTexture->GetWidth(), pTexture->GetHeight(),
                 pTexture->GetMX(), pTexture->GetMY());
-    pTexture->DebugName = Handle;
     pWindow->AddTexture(pTexture);
     ObjectHolder.Write(Handle, pTexture);
 }
@@ -1188,15 +1238,20 @@ void NSBInterpreter::ApplyTextWindowMode(Texture* pTexture)
     if (HorizontalText() && !pTexture->Remapped)
     {
         ReloadTexture(pTexture, Replacement);
-        pTexture->SetPosition(Low.find("textwindow_fw.png") != string::npos ? 224 : 264, 446);
+        pTexture->Move(Low.find("textwindow_fw.png") != string::npos ? 224 : 264, 446);
         pTexture->Remapped = true;
     }
     else if (!HorizontalText() && pTexture->Remapped)
     {
         ReloadTexture(pTexture, pTexture->SourceFile);
-        pTexture->SetPosition(pTexture->OrigX, pTexture->OrigY);
+        pTexture->Move(pTexture->OrigX, pTexture->OrigY);
         pTexture->Remapped = false;
     }
+
+    if (getenv("NP_TEX_DBG"))
+        fprintf(stderr, "[tex-mode] handle=%s horizontal=%d remapped=%d src=%s pos=%d,%d\n",
+                pTexture->DebugName.c_str(), HorizontalText(), pTexture->Remapped,
+                pTexture->SourceFile.c_str(), pTexture->GetMX(), pTexture->GetMY());
 }
 
 void NSBInterpreter::RelayoutTextWindows()
@@ -1479,22 +1534,11 @@ void NSBInterpreter::Move()
                 }
                 else if (pText && pText->ForceHorizontal)
                 {
-                    Texture* pBox = Get<Texture>("boxAll");
-                    if (pBox && TX >= pBox->GetX() && TX < pBox->GetX() + pBox->GetWidth() &&
-                        TY >= pBox->GetY() && TY < pBox->GetY() + pBox->GetHeight())
-                    {
-                        TX = pBox->GetX() + 15;
-                        TY = pBox->GetY() + 10;
-                        pText->Reflow(pBox->GetWidth() - 30);
-                    }
-                    else
-                    {
-                        bool FW = GetBool("$FwC_text_Window") || GetBool("$FwL_text_Window") ||
-                                  GetBool("$FwR_text_Window") || GetBool("$FwH_text_Window");
-                        TX = FW ? 365 : 286;
-                        TY = 453;
-                        pText->Reflow(FW ? 500 : 520);
-                    }
+                    bool FW = GetBool("$FwC_text_Window") || GetBool("$FwL_text_Window") ||
+                              GetBool("$FwR_text_Window") || GetBool("$FwH_text_Window");
+                    TX = FW ? 365 : 286;
+                    TY = 453;
+                    pText->Reflow(FW ? 500 : 520);
                 }
             }
             if (pContext->FastForward)
@@ -1569,6 +1613,7 @@ void NSBInterpreter::CreateColor()
     pTexture->SetVertex(Width / 2, Height / 2);
     pTexture->Move(X(Width), Y(Height));
     pTexture->SetPriority(Priority);
+    pTexture->DebugName = Handle;
 
     pWindow->AddTexture(pTexture);
     ObjectHolder.Write(Handle, pTexture);
@@ -1861,8 +1906,16 @@ void NSBInterpreter::ParseText()
     Text* pText = new Text;
     pText->CreateFromXML(XML);
     Handle = Box + "/" + Handle;
-    if (pContext->FastForward && Handle == ReplayTarget)
+    int32_t TextIndex = GetInt("$SYSTEM_present_text_index") + 1;
+    SetInt("$SYSTEM_present_text_index", TextIndex);
+    if (pContext->FastForward && Handle == ReplayTarget &&
+        (!ReplayTargetTextIndex || TextIndex == ReplayTargetTextIndex))
+    {
+        if (getenv("NP_TEX_DBG"))
+            fprintf(stderr, "[load] replay target handle=%s index=%d\n",
+                    Handle.c_str(), TextIndex);
         pContext->FastForward = false;
+    }
     SetString("$SYSTEM_present_text", Handle);
     ObjectHolder.Write(Handle, pText);
 }
@@ -1911,6 +1964,9 @@ void NSBInterpreter::Save()
         SaveGlobals();
         return;
     }
+    if (getenv("NP_TEX_DBG"))
+        fprintf(stderr, "[save] slot=%d target=%s index=%d\n", Slot,
+                GetString("$SYSTEM_present_text").c_str(), GetInt("$SYSTEM_present_text_index"));
 
     Npa::Buffer SaveData;
     uint32_t NumVars = 0;
@@ -2187,7 +2243,12 @@ void NSBInterpreter::Load()
     Npa::Buffer SaveData(NpaFile::Decrypt(pData, Size), Size);
     RestoreVariables(SaveData, false);
     string Target = GetString("$SYSTEM_present_text");
+    ReplayTargetTextIndex = GetInt("$SYSTEM_present_text_index");
     ReplayGameName = GetString("$GameName");
+    if (getenv("NP_TEX_DBG"))
+        fprintf(stderr, "[load] target handle=%s index=%d\n",
+                Target.c_str(), ReplayTargetTextIndex);
+    SetInt("$SYSTEM_present_text_index", 0);
     SetString("$SYSTEM_menu_enable", "false");
     SetString("$SYSTEM_menu_load_enable", "false");
     SetString("$SYSTEM_menu_save_enable", "false");
@@ -2248,6 +2309,7 @@ void NSBInterpreter::CreateText()
     pText->CreateFromString(String);
     pText->SetPriority(Priority);
     pText->SetPosition(X(pText->GetWidth()), Y(pText->GetHeight()));
+    pText->DebugName = Handle;
 
     pWindow->AddTexture(pText);
     ObjectHolder.Write(Handle, pText);
@@ -2479,9 +2541,12 @@ void NSBInterpreter::CreateScrollbar()
 
 void NSBInterpreter::SetScrollbarValue()
 {
-    Scrollbar* pScrollbar = PopScrollbar();
+    string Handle = PopString();
     int32_t Value = PopInt();
-    pScrollbar->SetValue(Value);
+    if (Scrollbar* pScrollbar = Get<Scrollbar>(Handle))
+        pScrollbar->SetValue(Value);
+    else
+        LogMissingScrollbar(Handle);
 }
 
 void NSBInterpreter::SetScrollbarWheelArea()
@@ -2496,8 +2561,14 @@ void NSBInterpreter::SetScrollbarWheelArea()
 
 void NSBInterpreter::ScrollbarValue()
 {
-    Scrollbar* pScrollbar = PopScrollbar();
-    PushInt(pScrollbar->GetValue());
+    string Handle = PopString();
+    if (Scrollbar* pScrollbar = Get<Scrollbar>(Handle))
+        PushInt(pScrollbar->GetValue());
+    else
+    {
+        LogMissingScrollbar(Handle);
+        PushInt(0);
+    }
 }
 
 void NSBInterpreter::CreateStencil()

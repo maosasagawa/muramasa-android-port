@@ -22,6 +22,7 @@
 #include "Choice.hpp"
 #include <SDL2/SDL.h>
 #include <functional>
+#include <map>
 #include <queue>
 #include <thread>
 #include <list>
@@ -327,7 +328,8 @@ protected:
     bool SkipHack;
     bool ThreadsModified;
     SDL_Event Event;
-    queue<SDL_Event> Events;
+    map<NSBContext*, queue<SDL_Event>> EventQueues;
+    list<NSBContext*> EventOrder;
     Window* pWindow;
     NSBContext* pContext;
     vector<NSBFunction> Builtins;
@@ -340,6 +342,7 @@ protected:
     ScriptFile* pBootScript;
     string ReplayTarget;
     string ReplayGameName;
+    int32_t ReplayTargetTextIndex = 0;
 };
 
 template <class T> T* NSBInterpreter::Get(const string& Name)

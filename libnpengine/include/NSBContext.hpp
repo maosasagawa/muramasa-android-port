@@ -59,7 +59,7 @@ public:
     void ClearWait();
     void OnWaitedObjectDeleted(Object* pDeleted);
     void TryWake();
-    void OnClick();
+    void OnClick(bool AdvanceText = true);
     bool IsStarving();
     bool IsSleeping();
     bool IsActive();
