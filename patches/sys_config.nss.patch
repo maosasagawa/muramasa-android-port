@@ -1,0 +1,78 @@
+--- a/sys_config.nss
++++ b/sys_config.nss
+@@ -372,6 +372,40 @@
+ 		$ConfigTestV=ImageVertical("Config1a_Test/MouseUsual/hit");
+ 
+ 		CreateSound("Config1a_TEST01", VOICE, "voice/ma01/0250430b56");
++
++		//▼定義「文字方向」
++	$ConfigTDirX=300;
++	$ConfigTDirY=470;
++		SetFont("黑体", 22, #FFFFFF, #000000, 500, NONE);
++		CreateText("Config1a_TDirLabel", 10100, $ConfigTDirX, $ConfigTDirY, 200, Auto, "文字方向");
++		CreateChoice("Config1a_TateON");
++		CreateColor("Config1a_TateON03", 10010, $ConfigTDirX+110, $ConfigTDirY-6, 80, 36, #1a1a1a);
++		CreateColor("Config1a_TateON/MouseUsual/hit", 10010, $ConfigTDirX+110, $ConfigTDirY-6, 80, 36, #000000);
++		CreateText("Config1a_TateON01", 10100, $ConfigTDirX+128, $ConfigTDirY, 100, Auto, "竖排");
++		SetFont("黑体", 22, #FFCC66, #000000, 500, NONE);
++		CreateText("Config1a_TateON02", 10101, $ConfigTDirX+128, $ConfigTDirY, 100, Auto, "竖排");
++		Request("Config1a_TateON/MouseUsual/hit", Erase);
++		SetFont("黑体", 22, #FFFFFF, #000000, 500, NONE);
++		CreateChoice("Config1a_YokoON");
++		CreateColor("Config1a_YokoON03", 10010, $ConfigTDirX+210, $ConfigTDirY-6, 80, 36, #1a1a1a);
++		CreateColor("Config1a_YokoON/MouseUsual/hit", 10010, $ConfigTDirX+210, $ConfigTDirY-6, 80, 36, #000000);
++		CreateText("Config1a_YokoON01", 10100, $ConfigTDirX+228, $ConfigTDirY, 100, Auto, "横排");
++		SetFont("黑体", 22, #FFCC66, #000000, 500, NONE);
++		CreateText("Config1a_YokoON02", 10101, $ConfigTDirX+228, $ConfigTDirY, 100, Auto, "横排");
++		Request("Config1a_YokoON/MouseUsual/hit", Erase);
++		SetFont("黑体", 16, #BBBBBB, #000000, 500, NONE);
++		CreateText("Config1a_TDirNote", 10100, $ConfigTDirX, $ConfigTDirY+40, 400, Auto, "从下一句对话起生效");
++		Request("Config1a_TDir*",NoLog);
++		Request("Config1a_TDir*",PushText);
++		Request("Config1a_TateON0*",NoLog);
++		Request("Config1a_TateON0*",PushText);
++		Request("Config1a_YokoON0*",NoLog);
++		Request("Config1a_YokoON0*",PushText);
++		if(#SYSTEM_text_horizontal){
++			Fade("Config1a_TateON02",0,0,null,false);
++		}else{
++			Fade("Config1a_YokoON02",0,0,null,false);
++		}
+ 
+ ..		//▼定義「ゲームスピード」
+ 		$ConfigPSpeedX=862;
+@@ -1158,6 +1192,10 @@
+ 		//●描画「基本」
+ 		Fade("Config1f*", 0, 1000, null, false);
+ 		Fade("Config9f*", 0, 1000, null, false);
++		Fade("Config1a_TDirLabel", 0, 1000, null, false);
++		Fade("Config1a_TateON*", 0, 1000, null, false);
++		Fade("Config1a_YokoON*", 0, 1000, null, false);
++		Fade("Config1a_TDirNote", 0, 1000, null, false);
+ 
+ ..		//●描画「確認メッセージ」
+ 		if(#no_ask){
+@@ -1435,6 +1473,16 @@
+ 					#no_ask=true;
+ 					Fade("Config1a_CConfirmON02",$ConfigFadeTime,0,null,false);
+ 					Fade("Config1a_CConfirmOFF02",$ConfigFadeTime,1000,null,false);
++				}
++				case Config1a_TateON{
++					#SYSTEM_text_horizontal=false;
++					Fade("Config1a_TateON02",$ConfigFadeTime,1000,null,false);
++					Fade("Config1a_YokoON02",$ConfigFadeTime,0,null,false);
++				}
++				case Config1a_YokoON{
++					#SYSTEM_text_horizontal=true;
++					Fade("Config1a_YokoON02",$ConfigFadeTime,1000,null,false);
++					Fade("Config1a_TateON02",$ConfigFadeTime,0,null,false);
+ 				}
+ 
+ ..				//★動画の中断
+@@ -5078,6 +5126,3 @@
+ 	Fade("@Config1a_CV_Bar03", 100, 0, null, false);
+ 	SetVolume("@Config1a_CV_Other/MouseOver/sound", 0, 1000, NULL);
+ }
+-
+-
+-

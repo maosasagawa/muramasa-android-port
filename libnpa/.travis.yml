@@ -1,0 +1,50 @@
+language: cpp
+
+compiler:
+  - gcc
+  - clang
+
+env:
+  # this is our secret upload key $UPLOAD_TOKEN:
+  secure: "I14aeKfPaQ7nWFW5Gn4g4bnO01iCP//Zmm9dfdhbvd7k21VfB3azxo/NkAYTYN9Z1tyZTeVP41yfGUIDCIep3+fOdhJ+qcFeOzm83CoMqffdnRgDGXdCzIMpelEMUcbRCA+5M9E0fmWk3Dt0FZVVFzpmJ+zVvpyg5zg/HjYw178="
+
+branches:
+  only:
+    - master
+
+notifications:
+  email:
+    on_success: change
+    on_failure: change
+  irc:
+    channels:
+      # WORKAROUND: prevents notifications from forks
+      secure: HI4IIeMAn+dJ0/mzLL4XioTO7nppC5tbsqfns+VbY4fS2nSQAfyspPck1Hc7ovZT9WfikZmz4yqBxkwQdIiGXjmyV0My+SLwjiWuyLtNtIVr8YnUE3dDbpOz1saZXel/PbmU0z5b8dda5SC+ps5VcdfzSh7NeHLC8J4LABgQhN4=
+    template:
+      - "%{repository_name} (%{commit}): %{message}, details: %{build_url}"
+    on_success: change
+    on_failure: change
+    use_notice: true
+    skip_join: true
+
+before_install:
+  - sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
+  - sudo add-apt-repository -y ppa:boost-latest/ppa
+  - sudo apt-get update -qq
+
+install:
+  - sudo apt-get install -qq libboost-locale1.55-dev libboost-filesystem1.55-dev curl
+  - if [ "$CXX" = "g++" ]; then sudo apt-get install -qq g++-4.8; fi
+
+before_script:
+  - if [ "$CXX" = "g++" ]; then export CXX="g++-4.8"; fi
+
+script:
+  - cmake . && make
+
+after_success:
+  - |
+    if [ "$CXX" = "g++-4.8" ]; then
+      curl https://gist.githubusercontent.com/carstene1ns/a23f152a40a589f098c6/raw/upload.sh > upload.sh
+      make package && bash upload.sh libnpa-*.tar.bz2
+    fi

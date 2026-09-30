@@ -1,0 +1,1 @@
+No license file, README licensing statement, or copyright/license header was present in the supplied FGRE `muramasa` source tree. Its upstream license could not be confirmed from the available source snapshot. This file does not grant or imply a license; verify the upstream terms before redistributing this directory.

@@ -1,0 +1,414 @@
+/*
+ * libnpengine: Nitroplus script interpreter
+ * Copyright (C) 2014-2016,2018 Mislav Blažević <krofnica996@gmail.com>
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Lesser Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Lesser Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * */
+#ifndef EFFECT_HPP
+#define EFFECT_HPP
+
+#ifndef NP_GLES2
+#include <cmath>
+#include <GL/glew.h>
+#endif
+#include "GLUtil.hpp"
+#include <png.h>
+#include "Texture.hpp"
+#include "nsbconstants.hpp"
+
+class Effect
+{
+public:
+    Effect() : Tempo(-1), Program(0) { }
+    ~Effect() { glDeleteProgram(Program); }
+
+protected:
+    float ApplyTempo(float Progress)
+    {
+        switch (Tempo)
+        {
+            case Nsb::AXL_1:
+                return pow(Progress, 2);
+            case Nsb::AXL_2:
+                return pow(Progress, 3);
+            case Nsb::AXL_3:
+                return pow(Progress, 4);
+            case Nsb::DXL_1:
+                return 1.0f - pow(1.0f - Progress, 2);
+            case Nsb::DXL_2:
+                return 1.0f - pow(1.0f - Progress, 3);
+            case Nsb::DXL_3:
+                return 1.0f - pow(1.0f - Progress, 4);
+            case Nsb::AXL_AUTO:
+                return 1.0f - cos(Progress * M_PI * 0.5f);
+            case Nsb::DXL_AUTO:
+                return sin(Progress * M_PI * 0.5f);
+            case Nsb::AXL_DXL:
+                return 0.5f * (1.0f - cos(Progress * M_PI));
+            case Nsb::DXL_AXL:
+                return acos(1.0f - Progress * 2.0f) / M_PI;
+        }
+        return Progress;
+    }
+
+    int32_t Lerp(int32_t Old, int32_t New, float Progress)
+    {
+        if (New > Old)
+            return Old + (New - Old) * ApplyTempo(Progress);
+        else
+            return Old - (Old - New) * ApplyTempo(Progress);
+    }
+
+    void CompileShader(const char* String)
+    {
+#ifdef NP_GLES2
+        Program = GLMakeProgram(String);
+#else
+        if (!GLEW_ARB_fragment_shader)
+            return;
+        Program = GLMakeProgram(String);
+#endif
+    }
+
+    int32_t Tempo;
+    GLuint Program;
+};
+
+class Tone : public Effect
+{
+    const string MonochromeShader = \
+        "uniform sampler2D Texture;"
+        "void main()"
+        "{"
+        "   vec4 Pixel = texture2D(Texture, gl_TexCoord[0].xy);"
+        "   gl_FragColor = vec4(vec3(Pixel.r + Pixel.g + Pixel.b) / 3.0, Pixel.a);"
+        "}";
+    const string NegaPosiShader = \
+        "uniform sampler2D Texture;"
+        "void main()"
+        "{"
+        "   vec4 Pixel = texture2D(Texture, gl_TexCoord[0].xy);"
+        "   gl_FragColor = vec4(vec3(1.0) - Pixel.rgb, Pixel.a);"
+        "}";
+    const string KitanoBlueShader = \
+        "uniform sampler2D Texture;"
+        "void main()"
+        "{"
+        "   vec4 Pixel = texture2D(Texture, gl_TexCoord[0].xy);"
+        "   float Intensity = Pixel.r * (27.0 / 255.0) + Pixel.g * (150.0 / 255.0) + Pixel.b * (76.0 / 255.0);"
+        "   vec4 Color = vec4(vec3(Intensity), Pixel.a);"
+        "   Color.gb = clamp(Color.gb + vec2(20.0 / 255.0, 80.0 / 255.0), vec2(0.0, 0.0), vec2(1.0, 1.0));"
+        "   gl_FragColor = Color;"
+        "}";
+    const string SepiaShader = \
+        "uniform sampler2D Texture;"
+        "void main()"
+        "{"
+        "   vec4 Pixel = texture2D(Texture, gl_TexCoord[0].xy);"
+        "   float Intensity = Pixel.r * (27.0 / 255.0) + Pixel.g * (150.0 / 255.0) + Pixel.b * (76.0 / 255.0);"
+        "   vec4 Color = vec4(vec3(Intensity), Pixel.a);"
+        "   Color.rg = clamp(Color.rg + vec2(30.0 / 255.0, 30.0 / 255.0), vec2(0.0, 0.0), vec2(1.0, 1.0));"
+        "   gl_FragColor = Color;"
+        "}";
+public:
+    Tone(int32_t Tone)
+    {
+        switch (Tone)
+        {
+            case Nsb::NEGA_POSI:
+                CompileShader(NegaPosiShader.c_str());
+                break;
+            case Nsb::MONOCHROME:
+                CompileShader(MonochromeShader.c_str());
+                break;
+            case Nsb::SEPIA:
+                CompileShader(SepiaShader.c_str());
+                break;
+            case Nsb::KITANO_BLUE:
+                CompileShader(KitanoBlueShader.c_str());
+                break;
+        }
+    }
+
+    void OnDraw()
+    {
+        if (!Program)
+            return;
+
+        glUseProgram(Program);
+        glUniform1i(glGetUniformLocation(Program, "Texture"), 0);
+    }
+};
+
+class LerpEffect : public Effect
+{
+public:
+    LerpEffect() { }
+    LerpEffect(int32_t StartX, int32_t StartY) : EndX(StartX), EndY(StartY) { }
+
+    void Reset(int32_t StartX, int32_t EndX, int32_t StartY, int32_t EndY, int32_t Time, int32_t Tempo)
+    {
+        this->StartX = StartX;
+        this->StartY = StartY;
+        this->EndX = EndX;
+        this->EndY = EndY;
+        this->Time = Time;
+        this->ElapsedTime = 0;
+        this->Tempo = Tempo;
+    }
+
+    void Reset(int32_t EndX, int32_t EndY, int32_t Time, int32_t Tempo)
+    {
+        Reset(this->EndX, EndX, this->EndY, EndY, Time, Tempo);
+    }
+
+    float GetProgress()
+    {
+        if (ElapsedTime >= Time)
+            return 1.0f;
+        return float(ElapsedTime) / float(Time);
+    }
+
+    void Update(int32_t diff, int32_t& x, int32_t& y)
+    {
+        ElapsedTime += diff;
+        x = Lerp(StartX, EndX, GetProgress());
+        y = Lerp(StartY, EndY, GetProgress());
+    }
+
+    int32_t StartX, StartY;
+    int32_t EndX, EndY;
+    int32_t ElapsedTime;
+    int32_t Time;
+};
+
+class RotateEffect : public LerpEffect
+{
+public:
+    RotateEffect(int32_t EndA, int32_t Time, int32_t Tempo) : LerpEffect(0, 0)
+    {
+        Reset(EndA, 0, Time, Tempo);
+    }
+
+    void OnDraw(Texture* pTexture, int32_t diff)
+    {
+        int32_t ax, ay;
+        Update(diff, ax, ay);
+        pTexture->SetAngle(ax);
+    }
+};
+
+class MoveEffect : public LerpEffect
+{
+public:
+    MoveEffect(int32_t EndX, int32_t EndY, int32_t Time, int32_t Tempo) : LerpEffect(0, 0)
+    {
+        Reset(EndX, EndY, Time, Tempo);
+    }
+
+    void OnDraw(Texture* pTexture, int32_t diff)
+    {
+        int32_t x, y;
+        Update(diff, x, y);
+        pTexture->SetPosition(x, y);
+    }
+};
+
+class ZoomEffect : public LerpEffect
+{
+public:
+    ZoomEffect(int32_t EndX, int32_t EndY, int32_t Time, int32_t Tempo) : LerpEffect(1000, 1000)
+    {
+        Reset(EndX, EndY, Time, Tempo);
+    }
+
+    void OnDraw(Texture* pTexture, int32_t diff)
+    {
+        int32_t x, y;
+        Update(diff, x, y);
+        pTexture->SetScale(x, y);
+    }
+};
+
+class FadeEffect : public LerpEffect
+{
+    const string MaskShader = \
+        "uniform sampler2D Texture;"
+        "uniform float Alpha;"
+        "void main()"
+        "{"
+        "   vec4 Pixel = texture2D(Texture, gl_TexCoord[0].xy);"
+        "   Pixel.a *= Alpha;"
+        "   gl_FragColor = Pixel;"
+        "}";
+public:
+    FadeEffect() : LastX(1000)
+    {
+    }
+
+    FadeEffect(int32_t EndOpacity, int32_t Time, int32_t Tempo) : LerpEffect(1000, 0), LastX(1000)
+    {
+        CompileShader(MaskShader.c_str());
+        Reset(EndOpacity, 0, Time, Tempo);
+    }
+
+    void OnDraw(int32_t diff)
+    {
+        int32_t x, y;
+        Update(diff, x, y);
+        LastX = x;
+
+        if (!Program)
+            return;
+
+        glUseProgram(Program);
+        glUniform1f(glGetUniformLocation(Program, "Alpha"), x * 0.001f);
+        glUniform1i(glGetUniformLocation(Program, "Texture"), 0);
+    }
+
+    int32_t GetAlpha() { return LastX; }
+
+private:
+    int32_t LastX;
+};
+
+class MaskEffect : public FadeEffect, GLTexture
+{
+    const string MaskShader = \
+        "uniform sampler2D Texture;"
+        "uniform sampler2D Mask;"
+        "uniform float Alpha;"
+        "uniform float Boundary;"
+        "void main()"
+        "{"
+        "   vec4 Pixel = texture2D(Texture, gl_TexCoord[0].xy);"
+        "   vec4 MaskPixel = texture2D(Mask, gl_TexCoord[0].xy);"
+        "   if (MaskPixel.r - Alpha <= 0.0f) Pixel.a = 1.0f;"
+        "   else if (MaskPixel.r - Alpha - Boundary <= 0.0f) Pixel.a = -(MaskPixel.r - Alpha - Boundary) / Boundary;"
+        "   else Pixel.a = 0.0f;"
+        "   gl_FragColor = Pixel;"
+        "}";
+public:
+    MaskEffect(const string& Filename, int32_t StartOpacity, int32_t EndOpacity, int32_t Time, int32_t Boundary, int32_t Tempo)
+    {
+        CompileShader(MaskShader.c_str());
+        Reset(Filename, StartOpacity, EndOpacity, Time, Boundary, Tempo);
+    }
+
+    void Reset(const string& Filename, int32_t StartOpacity, int32_t EndOpacity, int32_t Time, int32_t Boundary, int32_t Tempo)
+    {
+        CreateFromFile(Filename, true);
+        LerpEffect::Reset(StartOpacity, EndOpacity, 0, 0, Time, Tempo);
+
+        if (!Program)
+            return;
+
+        glUseProgram(Program);
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, GLTextureID);
+        glUniform1i(glGetUniformLocation(Program, "Mask"), 1);
+        glActiveTexture(GL_TEXTURE0);
+        glUniform1f(glGetUniformLocation(Program, "Boundary"), Boundary * 0.001f);
+    }
+};
+
+class BlurEffect : public Effect, GLTexture
+{
+    const string BlurShader = \
+        "uniform float Sigma;"
+        "uniform sampler2D Texture;"
+        "uniform vec2 Pass;"
+        "uniform float BlurSize;"
+        "const float NumSamples = 11.0f;"
+        "const float PI = 3.14159265f;"
+        "void main()"
+        "{"
+        "   vec3 Gaussian = vec3(1.0f / (sqrt(2.0f * PI) * Sigma), exp(-0.5f / (Sigma * Sigma)), 0.0f);"
+        "   Gaussian.z = Gaussian.y * Gaussian.y;"
+        "   vec4 Average = texture2D(Texture, gl_TexCoord[0].xy) * Gaussian.x;"
+        "   float CoeffSum = Gaussian.x;"
+        "   Gaussian.xy *= Gaussian.yz;"
+        "   for (float i = 1.0f; i <= NumSamples; ++i)"
+        "   {"
+        "       Average += texture2D(Texture, gl_TexCoord[0].xy + i * BlurSize * Pass) * Gaussian.x;"
+        "       Average += texture2D(Texture, gl_TexCoord[0].xy - i * BlurSize * Pass) * Gaussian.x;"
+        "       CoeffSum += 2.0f * Gaussian.x;"
+        "       Gaussian.xy *= Gaussian.yz;"
+        "   }"
+        "   gl_FragColor = Average / CoeffSum;"
+        "}";
+public:
+    BlurEffect() : Framebuffer(GL_INVALID_VALUE)
+    {
+    }
+
+    ~BlurEffect()
+    {
+        glDeleteFramebuffers(1, &Framebuffer);
+    }
+
+    bool Create(int Width, int Height, float Sigma)
+    {
+        CompileShader(BlurShader.c_str());
+
+        if (!Program)
+            return false;
+
+        glUseProgram(Program);
+        glUniform1f(glGetUniformLocation(Program, "Sigma"), Sigma);
+        glUniform1i(glGetUniformLocation(Program, "Texture"), 0);
+
+        glGenFramebuffers(1, &Framebuffer);
+        glBindFramebuffer(GL_FRAMEBUFFER, Framebuffer);
+        CreateEmpty(Width, Height);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, GLTextureID, 0);
+
+        if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+        {
+            glBindFramebuffer(GL_FRAMEBUFFER, 0);
+            return false;
+        }
+
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        return true;
+    }
+
+    void OnDraw(GLTexture* pTexture, float* xa, float* ya, float Width, float Height)
+    {
+        glUseProgram(Program);
+
+        // Switch to FBO
+        glBindFramebuffer(GL_FRAMEBUFFER, Framebuffer);
+        glViewport(0, 0, this->Width, this->Height);
+        GLSetOrtho(this->Width, this->Height);
+
+        // First pass to texture
+        glUniform1f(glGetUniformLocation(Program, "BlurSize"), 1.0f / this->Width);
+        glUniform2f(glGetUniformLocation(Program, "Pass"), 1.0f, 0.0f);
+        pTexture->Draw(0, 0, this->Width, this->Height);
+
+        // Switch to window
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        GLResetOrtho();
+
+        // Second pass to window
+        glUniform1f(glGetUniformLocation(Program, "BlurSize"), 1.0f / Height);
+        glUniform2f(glGetUniformLocation(Program, "Pass"), 0.0f, 1.0f);
+        Draw(xa, ya);
+    }
+
+    GLuint Framebuffer;
+};
+
+#endif
