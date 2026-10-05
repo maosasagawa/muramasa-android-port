@@ -9,6 +9,25 @@
 - Android 适配：信箱缩放、触摸输入及外部存储游戏目录。
 - `patches/` 只保存修改脚本的 unified diff；不要提交完整的原版或修改版游戏脚本。
 
+水平文字模式由引擎在 `NSBInterpreter::CallFunction` 的脚本函数调用入口实现：启用横排时，把对白、开窗、立绘和名牌等竖排函数调用改派到游戏已有的横排函数，并按目标函数调整参数；不改写场景文本，也不使用纹理位置重映射。方向切换从下一个 `SetText*` 调用起清除相反方向的文字框和立绘；项目只分发统一脚本差异，不分发完整游戏脚本。
+
+## 下载与安装
+
+1. 到本仓库 [Releases](https://github.com/maosasagawa/muramasa-android-port/releases) 下载 `muramasa-android-v*.apk`（同时包含 arm64-v8a 与 x86_64，debug 签名），或在 [Actions](https://github.com/maosasagawa/muramasa-android-port/actions) 中下载每次提交构建的 APK。
+2. 把自己正版游戏目录（含全部 `.npa` 与散文件）复制到下方目录。
+3. 如需在游戏「设置」中切换横排/竖排，先用 `scripts/apply_script_patches.sh` 生成打过补丁的 `sys_config.nss` 放进游戏目录；不打补丁也能运行，只是设置界面没有「文字方向」一项。
+
+## 当前进度
+
+- 已可运行：开场、警告页、标题菜单、新游戏、正文推进，背景/立绘/特效/BGM/音效，竖排正文。
+- 存档/读档：普通存档位、快速存读档、标题「从中继续」均已在桌面版实测可恢复场景并继续推进。
+- 横排模式：在设置中切换并持久化，排版仍在打磨中（对话框、名牌位置）。
+- 未实现：视频（OP）播放。
+
+## CI 与发布
+
+`.github/workflows/android.yml` 在每次推送到 `main`、PR 和手动触发时用 NDK r25c 从源码编译 SDL2、libpng、libjpeg-turbo 和引擎，生成 APK 并上传为 Actions 构建产物。推送 `v*` 标签（如 `git tag v0.1.0 && git push origin v0.1.0`）时自动创建 GitHub Release 并附上 APK。CI 不接触任何游戏数据。
+
 游戏数据安装目录：
 
 ```text

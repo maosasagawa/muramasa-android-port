@@ -16,3 +16,5 @@
 **/voice/**
 **/bgm/**
 android/app/src/main/jniLibs/**/*.so
+deps/
+dist/
