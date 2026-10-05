@@ -221,6 +221,11 @@ bool NSBContext::IsActive()
     return Active;
 }
 
+Text* NSBContext::GetWaitingText() const
+{
+    return pText;
+}
+
 void NSBContext::Start()
 {
     Active = true;

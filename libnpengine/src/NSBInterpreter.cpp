@@ -42,6 +42,11 @@
 #include <set>
 #include <png.h>
 #include <cctype>
+#include <cstdlib>
+#include <filesystem>
+#include <iomanip>
+#include <limits>
+#include <sstream>
 
 #define NSB_ERROR(MSG1, MSG2) cout << __PRETTY_FUNCTION__ << ": " << MSG1 << " " << MSG2 << endl;
 #define NSB_VARARGS 0xFF
@@ -102,6 +107,27 @@ bool ResolveFunction(NSBContext* Context, const string& Symbol)
         return true;
     uint32_t CodeLine;
     return sResourceMgr->ResolveSymbol(Symbol, CodeLine) != nullptr;
+}
+
+bool ReadNonnegativeInteger(const char* Value, uint64_t& Result)
+{
+    if (!Value || !*Value)
+        return false;
+    char* End = nullptr;
+    long long Parsed = strtoll(Value, &End, 10);
+    if (End == Value || *End || Parsed < 0)
+        return false;
+    Result = static_cast<uint64_t>(Parsed);
+    return true;
+}
+
+string SanitizeFilename(const string& Value)
+{
+    string Result;
+    Result.reserve(Value.size());
+    for (unsigned char C : Value)
+        Result += (isalnum(C) || C == '_' || C == '-' || C == '.') ? static_cast<char>(C) : '_';
+    return Result.empty() ? "text" : Result;
 }
 
 bool IsTypeBeginSuffix(const string& Suffix)
@@ -205,6 +231,20 @@ pContext(nullptr),
 Builtins(MAGIC_UNK119 + 1, {nullptr, 0}),
 pBootScript(nullptr)
 {
+    uint64_t Parsed = 0;
+    if (ReadNonnegativeInteger(getenv("NP_AUTO_ADVANCE"), Parsed))
+    {
+        AutoAdvanceEnabled = true;
+        AutoAdvanceDelay = Parsed;
+    }
+    if (const char* Value = getenv("NP_SHOT_DIR"))
+        AutoShotDirectory = Value;
+    if (const char* Value = getenv("NP_STOP_AT"))
+        StopAtText = Value;
+    if (ReadNonnegativeInteger(getenv("NP_AUTOLOAD"), Parsed) && Parsed > 0 &&
+        Parsed <= static_cast<uint64_t>(std::numeric_limits<int>::max()))
+        AutoLoadSlot = static_cast<int>(Parsed);
+
     srand(time(0));
 
     // Engine-level default: real engine provides a save dir.
@@ -455,6 +495,181 @@ void NSBInterpreter::Update(uint32_t Diff)
 {
     for (NSBContext* pContext : Threads)
         pContext->Update(Diff);
+    UpdateAutoAdvance(Diff);
+}
+
+void NSBInterpreter::UpdateAutoAdvance(uint32_t Diff)
+{
+    if (!AutoAdvanceEnabled || AutoAdvanceStopped || AutoAdvanceClickQueued)
+        return;
+
+    const bool ModalMenuActive =
+        GetBool("$SYSTEM_menu_save_enable") ||
+        GetBool("$SYSTEM_menu_load_enable") ||
+        GetBool("$SYSTEM_menu_config_enable") ||
+        GetBool("$SYSTEM_backlog_enable") ||
+        GetBool("$SYSTEM_menu_close_enable") ||
+        GetBool("$SYSTEM_reset_enable");
+    if (ModalMenuActive)
+        return;
+
+    const string ActiveText = GetString("$SYSTEM_present_text");
+    for (NSBContext* pThread : Threads)
+    {
+        Text* pText = pThread->GetWaitingText();
+        if (!pText)
+        {
+            AutoAdvanceStates.erase(pThread);
+            continue;
+        }
+        if (pText->DebugName.empty() || pText->DebugName != ActiveText)
+        {
+            AutoAdvanceStates.erase(pThread);
+            continue;
+        }
+
+        AutoAdvanceState& State = AutoAdvanceStates[pThread];
+        const size_t TextIndex = pText->GetIndex();
+        if (State.pText != pText || State.TextIndex != TextIndex)
+        {
+            State.pText = pText;
+            State.TextIndex = TextIndex;
+            State.Elapsed = 0;
+        }
+        State.Elapsed += Diff;
+        if (State.Elapsed < AutoAdvanceDelay)
+            continue;
+
+        CaptureAutoShot(pText);
+        if (!StopAtText.empty())
+        {
+            const string& Handle = pText->DebugName;
+            const size_t Slash = Handle.rfind('/');
+            const string BaseName = Slash == string::npos ? Handle : Handle.substr(Slash + 1);
+            if (StopAtText == Handle || StopAtText == BaseName)
+            {
+                AutoAdvanceStopped = true;
+                fprintf(stderr, "[auto-advance] stopped at text=%s\n", Handle.c_str());
+                return;
+            }
+        }
+
+        SDL_Event Click;
+        SDL_zero(Click);
+        Click.type = SDL_MOUSEBUTTONDOWN;
+        Click.button.button = SDL_BUTTON_LEFT;
+        Click.button.state = SDL_PRESSED;
+        Click.button.clicks = 1;
+        Click.button.which = std::numeric_limits<Uint32>::max();
+        Click.button.x = -1;
+        Click.button.y = -1;
+        if (SDL_PushEvent(&Click) == 1)
+        {
+            AutoAdvanceClickQueued = true;
+            State.Elapsed = 0;
+            fprintf(stderr, "[auto-advance] click text=%s index=%zu\n",
+                    pText->DebugName.c_str(), TextIndex);
+        }
+        else
+            fprintf(stderr, "[auto-advance] could not queue click for text=%s\n",
+                    pText->DebugName.c_str());
+        return;
+    }
+}
+
+void NSBInterpreter::CaptureAutoShot(Text* pText)
+{
+    if (AutoShotDirectory.empty() || !pText)
+        return;
+
+    std::error_code Error;
+    std::filesystem::create_directories(AutoShotDirectory, Error);
+    if (Error)
+    {
+        fprintf(stderr, "[shot-error] directory=%s error=%s\n",
+                AutoShotDirectory.c_str(), Error.message().c_str());
+        return;
+    }
+
+    const int Width = pWindow->WIDTH;
+    const int Height = pWindow->HEIGHT;
+    vector<uint8_t> Readback(static_cast<size_t>(Width) * Height * 4);
+    vector<uint8_t> Pixels(Readback.size());
+#ifndef NP_GLES2
+    glReadBuffer(GL_BACK);
+#endif
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glReadPixels(0, 0, Width, Height, GL_RGBA, GL_UNSIGNED_BYTE, Readback.data());
+    for (int Y = 0; Y < Height; ++Y)
+        memcpy(Pixels.data() + static_cast<size_t>(Y) * Width * 4,
+               Readback.data() + static_cast<size_t>(Height - 1 - Y) * Width * 4,
+               static_cast<size_t>(Width) * 4);
+
+    const bool Horizontal = HorizontalText();
+    ostringstream Filename;
+    Filename << setw(6) << setfill('0') << ++ShotSequence << "_"
+             << SanitizeFilename(pText->DebugName) << "_"
+             << (Horizontal ? "H" : "V") << ".png";
+    const string FullPath = (std::filesystem::path(AutoShotDirectory) / Filename.str()).string();
+
+    png_image ImageData = {};
+    ImageData.version = PNG_IMAGE_VERSION;
+    ImageData.width = Width;
+    ImageData.height = Height;
+    ImageData.format = PNG_FORMAT_RGBA;
+    if (!png_image_write_to_file(&ImageData, FullPath.c_str(), 0,
+                                 Pixels.data(), 0, nullptr))
+    {
+        fprintf(stderr, "[shot-error] file=%s error=%s\n",
+                FullPath.c_str(), ImageData.message);
+        png_image_free(&ImageData);
+        return;
+    }
+    png_image_free(&ImageData);
+
+    fprintf(stderr, "[shot] file=%s text=%s orient=%c\n",
+            FullPath.c_str(), pText->DebugName.c_str(), Horizontal ? 'H' : 'V');
+    set<Texture*> Logged;
+    auto LogTexture = [&Logged](const string& Label, Texture* pTexture)
+    {
+        if (!pTexture || !Logged.insert(pTexture).second)
+            return;
+        const string& Handle = pTexture->DebugName.empty() ? Label : pTexture->DebugName;
+        fprintf(stderr, "[shot] handle=%s alpha=%d pos=%d,%d priority=%d size=%dx%d\n",
+                Handle.c_str(), pTexture->DebugAlpha(), pTexture->GetX(), pTexture->GetY(),
+                pTexture->GetPriority(), pTexture->GetWidth(), pTexture->GetHeight());
+    };
+    auto LogHandle = [this, &LogTexture](const string& Handle)
+    {
+        bool Found = false;
+        ObjectHolder.Execute(Handle, [&Found, &LogTexture, Handle](Object** ppObject)
+        {
+            if (ppObject && *ppObject)
+                if (Texture* pTexture = dynamic_cast<Texture*>(*ppObject))
+                {
+                    Found = true;
+                    LogTexture(Handle, pTexture);
+                }
+        });
+        if (!Found)
+            fprintf(stderr, "[shot] handle=%s alpha=missing pos=missing priority=missing\n",
+                    Handle.c_str());
+    };
+    for (const string Handle : {"boxH", "boxTH", "boxCC", "boxCT", "絵色100"})
+        LogHandle(Handle);
+    bool HasFaceTexture = false;
+    ObjectHolder.Execute("@Fw*", [&LogTexture, &HasFaceTexture](Object** ppObject)
+        {
+            if (ppObject && *ppObject)
+                if (Texture* pTexture = dynamic_cast<Texture*>(*ppObject))
+                {
+                    HasFaceTexture = true;
+                    LogTexture(pTexture->DebugName, pTexture);
+                }
+        });
+    if (!HasFaceTexture)
+        fprintf(stderr, "[shot] handle=@Fw* alpha=missing pos=missing priority=missing\n");
+    LogTexture(pText->DebugName, pText);
 }
 
 void NSBInterpreter::PushEvent(const SDL_Event& Event)
@@ -486,6 +701,8 @@ void NSBInterpreter::HandleEvent(const SDL_Event& Event)
     {
     case SDL_MOUSEBUTTONDOWN:
     {
+        if (Event.button.which == std::numeric_limits<Uint32>::max())
+            AutoAdvanceClickQueued = false;
         ProcessButton(Event.button.button, "true");
         const bool ModalMenuActive =
             GetBool("$SYSTEM_menu_save_enable") ||
@@ -599,32 +816,19 @@ void NSBInterpreter::CallFunction()
         LastTextWindowSymbol = Symbol;
 
     if (TextOrientationTransitionPending && Symbol.compare(0, 9, "TypeBegin") == 0)
-    {
-        bool Once = Symbol.compare(0, 13, "TypeBeginOnce") == 0;
-        if (!Once)
-        {
-            string Box;
-            if (IsHorizontalTypeBegin(Symbol))
-                Box = GetBool("$FwH_text_Window") ? "@boxTH" : "@boxH";
-            else
-            {
-                char Side = GetTypeBeginSide(Symbol);
-                string Prefix(1, Side == 'R' || Side == 'L' ? Side : 'C');
-                Box = GetBool("$Fw" + Prefix + "_text_Window") ?
-                    "@box" + Prefix + "T" : "@box" + Prefix + "C";
-            }
-            ObjectHolder.Execute(Box, [](Object** ppObject)
-            {
-                if (Texture* pTexture = dynamic_cast<Texture*>(*ppObject))
-                    pTexture->Fade(0, 1000);
-            });
-        }
         TextOrientationTransitionPending = false;
-    }
     if (ReplayTargetRestorePending && Symbol.compare(0, 9, "TypeBegin") == 0)
         RestoreTextWindow(Symbol, true);
     else if (Symbol.compare(0, 9, "TypeBegin") == 0 &&
              Symbol.size() >= 3 && Symbol.compare(Symbol.size() - 3, 3, "IFO") == 0)
+        RestoreTextWindow(Symbol, false);
+    else if (Symbol.compare(0, 9, "TypeBegin") == 0 &&
+             Symbol.compare(0, 13, "TypeBeginOnce") != 0 &&
+             Symbol.size() >= 2 &&
+             (Symbol.compare(Symbol.size() - 2, 2, "CI") == 0 ||
+              Symbol.compare(Symbol.size() - 2, 2, "RI") == 0 ||
+              Symbol.compare(Symbol.size() - 2, 2, "LI") == 0 ||
+              Symbol.compare(Symbol.size() - 2, 2, "HI") == 0))
         RestoreTextWindow(Symbol, false);
     CallFunction_(pContext, Symbol);
 }
@@ -849,6 +1053,15 @@ void NSBInterpreter::WhileEnd()
  * */
 void NSBInterpreter::Select()
 {
+    if (!AutoLoadTriggered && AutoLoadSlot > 0 &&
+        pContext->GetName() == "__main__" && GetBool("$PLACE_title"))
+    {
+        AutoLoadTriggered = true;
+        fprintf(stderr, "[autoload] slot=%d at title\n", AutoLoadSlot);
+        LoadSlot(AutoLoadSlot);
+        return;
+    }
+
     auto Inserted = EventQueues.emplace(pContext, queue<SDL_Event>());
     if (Inserted.second)
         EventOrder.push_back(pContext);
@@ -1223,6 +1436,7 @@ void NSBInterpreter::AddThread(NSBContext* pThread)
 void NSBInterpreter::RemoveThread(NSBContext* pThread)
 {
     Threads.remove(pThread);
+    AutoAdvanceStates.erase(pThread);
     EventQueues.erase(pThread);
     EventOrder.remove(pThread);
     pWindow->Select(!EventQueues.empty());
@@ -1387,7 +1601,7 @@ void NSBInterpreter::RestoreTextWindow(const string& Symbol, bool Replay)
             fprintf(stderr, "[load] restore text window symbol=%s box=%s face=%s\n",
                     Symbol.c_str(), Box.c_str(), HasFace ? Face.c_str() : "none");
         else
-            fprintf(stderr, "[text-window] menu restore symbol=%s box=%s face=%s\n",
+            fprintf(stderr, "[text-window] restore symbol=%s box=%s face=%s\n",
                     Symbol.c_str(), Box.c_str(), HasFace ? Face.c_str() : "none");
     }
 }
@@ -2533,6 +2747,11 @@ void NSBInterpreter::Load()
     int Slot = PopInt();
     if (pContext->GetNumParams() > 1)
         PopBool();
+    LoadSlot(Slot);
+}
+
+void NSBInterpreter::LoadSlot(int Slot)
+{
     if (Slot == 0)
     {
         LoadGlobals();
@@ -2542,7 +2761,11 @@ void NSBInterpreter::Load()
     uint32_t Size;
     char* pData = fs::ReadFile(Filename, Size);
     if (!pData)
+    {
+        if (AutoLoadTriggered && Slot == AutoLoadSlot)
+            fprintf(stderr, "[autoload] missing slot=%d file=%s\n", Slot, Filename.c_str());
         return;
+    }
     Npa::Buffer SaveData(NpaFile::Decrypt(pData, Size), Size);
     LastTextWindowSymbol.clear();
     DialogueMenuWasOpen = false;
@@ -2590,6 +2813,8 @@ void NSBInterpreter::Load()
     ReplayTargetRestorePending = false;
     HasLastTextOrientation = false;
     TextOrientationTransitionPending = false;
+    AutoAdvanceStates.clear();
+    AutoAdvanceClickQueued = false;
     if (pBootScript)
         pContext->Call(pBootScript, "chapter.main");
 }

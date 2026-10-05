@@ -107,6 +107,7 @@ class Texture;
 class Playable;
 class Scrollbar;
 class NSBContext;
+class Text;
 class NSBInterpreter
 {
     struct NSBFunction
@@ -326,6 +327,9 @@ protected:
     void ProcessKey(int Key, const string& Val);
     void ProcessButton(int button, const string& Val);
     void RestoreVariables(Npa::Buffer& SaveData, bool GlobalsOnly);
+    void LoadSlot(int Slot);
+    void UpdateAutoAdvance(uint32_t Diff);
+    void CaptureAutoShot(Text* pText);
 
     void DebuggerMain();
     void Inspect(int32_t n);
@@ -365,6 +369,22 @@ protected:
     bool HasLastTextOrientation = false;
     bool LastTextHorizontal = false;
     bool TextOrientationTransitionPending = false;
+    struct AutoAdvanceState
+    {
+        Text* pText = nullptr;
+        size_t TextIndex = 0;
+        uint64_t Elapsed = 0;
+    };
+    map<NSBContext*, AutoAdvanceState> AutoAdvanceStates;
+    bool AutoAdvanceEnabled = false;
+    bool AutoAdvanceClickQueued = false;
+    bool AutoAdvanceStopped = false;
+    uint64_t AutoAdvanceDelay = 0;
+    string AutoShotDirectory;
+    string StopAtText;
+    uint64_t ShotSequence = 0;
+    int AutoLoadSlot = -1;
+    bool AutoLoadTriggered = false;
 };
 
 template <class T> T* NSBInterpreter::Get(const string& Name)

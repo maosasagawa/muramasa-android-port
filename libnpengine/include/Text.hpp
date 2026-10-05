@@ -35,6 +35,7 @@ public:
     void SetColor(uint32_t Color);
     void SetWrap(int32_t Width);
     bool Advance();
+    size_t GetIndex() const { return Index; }
 
     void SetVertical(bool V);
 

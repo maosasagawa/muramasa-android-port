@@ -63,6 +63,7 @@ public:
     bool IsStarving();
     bool IsSleeping();
     bool IsActive();
+    Text* GetWaitingText() const;
     void Start();
     void Request(int32_t State);
     const string& GetName();

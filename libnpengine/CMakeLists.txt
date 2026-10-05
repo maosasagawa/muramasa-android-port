@@ -95,6 +95,11 @@ target_link_libraries(npengine
 	${PNG_LIBRARIES}
 	-lGL)
 
+add_executable(fonttest
+    tools/fonttest.cpp
+    src/FontRenderer.cpp)
+target_link_libraries(fonttest ${PNG_LIBRARIES})
+
 # install headers and library
 install(DIRECTORY ${PROJECT_SOURCE_DIR}/include/
     DESTINATION include/libnpengine

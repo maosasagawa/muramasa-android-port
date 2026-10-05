@@ -4,6 +4,7 @@
  * dependency (needed for the Android port).
  * */
 #include "FontRenderer.hpp"
+#include <algorithm>
 #include <cstdlib>
 #include <cmath>
 #include <cstring>
@@ -115,9 +116,12 @@ bool IsUprightVerticalPunctuation(uint32_t cp)
 }
 
 // Returns an RGBA (white, alpha=coverage) buffer; caller frees.
-uint8_t* FontRenderText(const char* String, int Size, int WrapWidth, int* OutW, int* OutH, bool Vertical)
+uint8_t* FontRenderText(const char* String, int Size, int WrapWidth, int* OutW, int* OutH,
+                        bool Vertical, std::vector<FontGlyphMetrics>* Metrics)
 {
     *OutW = *OutH = 0;
+    if (Metrics)
+        Metrics->clear();
     if (!LoadFont() || !String || !*String)
         return nullptr;
 
@@ -166,7 +170,11 @@ uint8_t* FontRenderText(const char* String, int Size, int WrapWidth, int* OutW, 
         unsigned char* Bitmap = stbtt_GetCodepointBitmap(&FontInfo, Scale, Scale,
                                                         g.cp, &w, &h, &xoff, &yoff);
         if (!Bitmap)
+        {
+            if (Metrics)
+                Metrics->push_back({g.cp, g.x, g.y, g.adv, LineHeight, 0, 0, 0, 0, 0, 0});
             continue;
+        }
         bool SidewaysVertical = Vertical && IsSidewaysVerticalGlyph(g.cp);
         bool UprightVertical = Vertical && IsUprightVerticalPunctuation(g.cp);
         double InkCenterX = (w - 1) * 0.5, InkCenterY = (h - 1) * 0.5;
@@ -197,7 +205,7 @@ uint8_t* FontRenderText(const char* String, int Size, int WrapWidth, int* OutW, 
             if (IsTopRightVerticalPunctuation(g.cp))
             {
                 double TargetX = g.x + (g.adv - 1) * 0.25;
-                double TargetY = g.y + (LineHeight - 1) * 0.5 - Size * 0.2;
+                double TargetY = g.y + (LineHeight - 1) * 0.5 - Size * 0.25;
                 PX = (int)lround(TargetX - InkCenterY);
                 PY = (int)lround(TargetY - (w - 1 - InkCenterX));
             }
@@ -221,6 +229,8 @@ uint8_t* FontRenderText(const char* String, int Size, int WrapWidth, int* OutW, 
                 PY += h / 2 - w / 2;
             }
         }
+        int InkMinX = W, InkMinY = H, InkMaxX = -1, InkMaxY = -1;
+        double InkWeight = 0, InkSumX = 0, InkSumY = 0;
         for (int row = 0; row < h; ++row)
         {
             for (int col = 0; col < w; ++col)
@@ -239,12 +249,33 @@ uint8_t* FontRenderText(const char* String, int Size, int WrapWidth, int* OutW, 
                 }
                 if (Dy < 0 || Dy >= H || Dx < 0 || Dx >= W) continue;
                 uint8_t Cov = Bitmap[row * w + col];
+                if (Metrics && Cov)
+                {
+                    InkMinX = std::min(InkMinX, Dx);
+                    InkMinY = std::min(InkMinY, Dy);
+                    InkMaxX = std::max(InkMaxX, Dx);
+                    InkMaxY = std::max(InkMaxY, Dy);
+                    InkWeight += Cov;
+                    InkSumX += Dx * Cov;
+                    InkSumY += Dy * Cov;
+                }
                 uint8_t* Px = Buf + 4 * (Dy * W + Dx);
                 // white text; alpha = coverage (straight alpha blending)
                 Px[0] = Px[1] = Px[2] = 255;
                 int A = Cov + Px[3];
                 Px[3] = A > 255 ? 255 : A;
             }
+        }
+        if (Metrics)
+        {
+            const bool HasInk = InkMaxX >= InkMinX && InkMaxY >= InkMinY && InkWeight > 0;
+            Metrics->push_back({g.cp, g.x, g.y, g.adv, LineHeight,
+                                HasInk ? InkMinX : 0,
+                                HasInk ? InkMinY : 0,
+                                HasInk ? InkMaxX - InkMinX + 1 : 0,
+                                HasInk ? InkMaxY - InkMinY + 1 : 0,
+                                HasInk ? InkSumX / InkWeight : 0,
+                                HasInk ? InkSumY / InkWeight : 0});
         }
         stbtt_FreeBitmap(Bitmap, nullptr);
     }
