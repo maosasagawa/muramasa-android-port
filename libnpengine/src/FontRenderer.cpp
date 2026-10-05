@@ -5,6 +5,7 @@
  * */
 #include "FontRenderer.hpp"
 #include <cstdlib>
+#include <cmath>
 #include <cstring>
 #include <vector>
 #include <string>
@@ -78,11 +79,42 @@ std::vector<uint32_t> Decode(const char* Str)
     }
     return Out;
 }
+
+bool IsTopRightVerticalPunctuation(uint32_t cp)
+{
+    return cp == 0x3001 || cp == 0x3002 || cp == 0xFF0C || cp == 0xFF0E;
+}
+
+bool IsSidewaysVerticalGlyph(uint32_t cp)
+{
+    switch (cp)
+    {
+        case 0x0028: case 0x0029:
+        case 0x2013: case 0x2014: case 0x2015:
+        case 0x2025: case 0x2026:
+        case 0x2212:
+        case 0x3008: case 0x3009:
+        case 0x300A: case 0x300B:
+        case 0x300C: case 0x300D:
+        case 0x300E: case 0x300F:
+        case 0x3010: case 0x3011:
+        case 0x301C:
+        case 0x30FC:
+        case 0xFF08: case 0xFF09:
+        case 0xFF0D: case 0xFF5E:
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool IsUprightVerticalPunctuation(uint32_t cp)
+{
+    return cp == 0xFF01 || cp == 0xFF1F || cp == '!' || cp == '?';
+}
 }
 
 // Returns an RGBA (white, alpha=coverage) buffer; caller frees.
-// Vertical: N2 tategaki — scripts rotate the text texture 90 deg; pre-rotate
-// each glyph 90 deg CCW so characters come out upright in vertical columns.
 uint8_t* FontRenderText(const char* String, int Size, int WrapWidth, int* OutW, int* OutH, bool Vertical)
 {
     *OutW = *OutH = 0;
@@ -135,24 +167,58 @@ uint8_t* FontRenderText(const char* String, int Size, int WrapWidth, int* OutW, 
                                                         g.cp, &w, &h, &xoff, &yoff);
         if (!Bitmap)
             continue;
+        bool SidewaysVertical = Vertical && IsSidewaysVerticalGlyph(g.cp);
+        bool UprightVertical = Vertical && IsUprightVerticalPunctuation(g.cp);
+        double InkCenterX = (w - 1) * 0.5, InkCenterY = (h - 1) * 0.5;
+        if (Vertical && (IsTopRightVerticalPunctuation(g.cp) ||
+                         UprightVertical || SidewaysVertical))
+        {
+            double InkWeight = 0, InkX = 0, InkY = 0;
+            for (int row = 0; row < h; ++row)
+            {
+                for (int col = 0; col < w; ++col)
+                {
+                    unsigned char Cov = Bitmap[row * w + col];
+                    InkWeight += Cov;
+                    InkX += col * Cov;
+                    InkY += row * Cov;
+                }
+            }
+            if (InkWeight)
+            {
+                InkCenterX = InkX / InkWeight;
+                InkCenterY = InkY / InkWeight;
+            }
+        }
         int Baseline = (int)(Ascent * Scale);
         int PX = g.x + xoff, PY = g.y + Baseline + yoff;
         if (Vertical)
         {
-            // Rotate about the glyph's ink center so non-square glyphs
-            // (e.g. 一) stay centered in their cell.
-            PX += w / 2 - h / 2;
-            PY += h / 2 - w / 2;
-            // Full-width punctuation sits at the top-right of its tategaki
-            // cell; after the CW display rotation that is the texture-space
-            // cell origin (min x = top, min y = right).
-            switch (g.cp)
+            if (IsTopRightVerticalPunctuation(g.cp))
             {
-                case 0x3001: case 0x3002: // 、。
-                case 0xFF0C: case 0xFF0E: // ，．
-                    PX = g.x + (int)(Size * 0.12f);
-                    PY = g.y + (int)(Size * 0.12f);
-                    break;
+                double TargetX = g.x + (g.adv - 1) * 0.25;
+                double TargetY = g.y + (LineHeight - 1) * 0.5 - Size * 0.2;
+                PX = (int)lround(TargetX - InkCenterY);
+                PY = (int)lround(TargetY - (w - 1 - InkCenterX));
+            }
+            else if (IsUprightVerticalPunctuation(g.cp))
+            {
+                double TargetX = g.x + (g.adv - 1) * 0.5;
+                double TargetY = g.y + (LineHeight - 1) * 0.5;
+                PX = (int)lround(TargetX - InkCenterY);
+                PY = (int)lround(TargetY - (w - 1 - InkCenterX));
+            }
+            else if (SidewaysVertical)
+            {
+                double TargetX = g.x + (g.adv - 1) * 0.5;
+                double TargetY = g.y + (LineHeight - 1) * 0.5;
+                PX = (int)lround(TargetX - InkCenterX);
+                PY = (int)lround(TargetY - InkCenterY);
+            }
+            else
+            {
+                PX += w / 2 - h / 2;
+                PY += h / 2 - w / 2;
             }
         }
         for (int row = 0; row < h; ++row)
@@ -160,7 +226,7 @@ uint8_t* FontRenderText(const char* String, int Size, int WrapWidth, int* OutW, 
             for (int col = 0; col < w; ++col)
             {
                 int Dx, Dy;
-                if (Vertical)
+                if (Vertical && !SidewaysVertical)
                 {
                     // rotate glyph 90 deg CCW about its ink center
                     Dx = PX + row;

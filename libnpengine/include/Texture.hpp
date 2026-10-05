@@ -66,9 +66,7 @@ public:
     int32_t GetMX();
     int32_t GetMY();
     int32_t RemainFade();
-    string SourceFile;
-    int OrigX, OrigY;
-    bool Remapped;
+    int32_t GetOpacity();
 
 private:
     MoveEffect* pMove;

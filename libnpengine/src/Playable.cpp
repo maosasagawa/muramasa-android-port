@@ -162,6 +162,15 @@ int32_t Playable::PassageTime()
 void Playable::SetLoop(bool Loop)
 {
     this->Loop = Loop;
+    if (DeferredFastForwardPlay)
+    {
+        DeferredFastForwardPlay = false;
+        if (Loop)
+            Play();
+    }
+    if (getenv("NP_SND_DBG"))
+        fprintf(stderr, "[snd] set-loop playable=%p bgm=%d loop=%d playing=%d\n",
+                (void*)this, IsBGM, this->Loop, Playing);
 }
 
 void Playable::Stop()
@@ -228,8 +237,8 @@ void Playable::Play()
     {
         Playing = true;
         if (getenv("NP_SND_DBG"))
-            fprintf(stderr, "[snd] play playable=%p bgm=%d playing=%d vorbis=%d stream=%d device=0\n",
-                    (void*)this, IsBGM, Playing, !!Vorbis, !!Stream);
+            fprintf(stderr, "[snd] play playable=%p bgm=%d loop=%d playing=%d vorbis=%d stream=%d device=0\n",
+                    (void*)this, IsBGM, Loop, Playing, !!Vorbis, !!Stream);
         return;
     }
     SDL_LockAudioDevice(Device);
@@ -244,8 +253,8 @@ void Playable::Play()
     }
     SDL_UnlockAudioDevice(Device);
     if (getenv("NP_SND_DBG"))
-        fprintf(stderr, "[snd] play playable=%p bgm=%d playing=%d vorbis=%d stream=%d device=1\n",
-                (void*)this, IsBGM, Playing, !!Vorbis, !!Stream);
+        fprintf(stderr, "[snd] play playable=%p bgm=%d loop=%d playing=%d vorbis=%d stream=%d device=1\n",
+                (void*)this, IsBGM, Loop, Playing, !!Vorbis, !!Stream);
 }
 
 void Playable::FeedStream()

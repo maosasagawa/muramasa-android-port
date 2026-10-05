@@ -143,11 +143,23 @@ void Window::DrawTextures(uint32_t Diff)
             const string& Handle = t->DebugName;
             if (Handle.find("Config1a_TDir") == string::npos &&
                 Handle.find("Config1a_TateON") == string::npos &&
-                Handle.find("Config1a_YokoON") == string::npos)
+                Handle.find("Config1a_YokoON") == string::npos &&
+                Handle != "boxH" && Handle != "boxTH" &&
+                Handle != "boxCC" && Handle != "boxCT" &&
+                Handle.find("/text") == string::npos &&
+                Handle.find("FwH") == string::npos &&
+                Handle.find("FwC") == string::npos &&
+                Handle.find("FwR") == string::npos &&
+                Handle.find("FwL") == string::npos &&
+                Handle != "絵色100" && Handle != "黒幕１")
                 continue;
-            fprintf(stderr, "[tex-draw] frame=%zu handle=%s priority=%d pos=%d,%d size=%dx%d alpha=%d visible=1\n",
+            int Width = t->GetWidth();
+            int Height = t->GetHeight();
+            int Alpha = t->DebugAlpha();
+            int Visible = Alpha > 0 && Width > 0 && Height > 0;
+            fprintf(stderr, "[tex-draw] frame=%zu handle=%s priority=%d pos=%d,%d size=%dx%d alpha=%d visible=%d\n",
                     Frame, Handle.c_str(), t->GetPriority(),
-                    t->GetX(), t->GetY(), t->GetWidth(), t->GetHeight(), t->DebugAlpha());
+                    t->GetX(), t->GetY(), Width, Height, Alpha, Visible);
         }
     }
     if (getenv("NP_DRAW_DBG"))

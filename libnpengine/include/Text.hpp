@@ -36,12 +36,7 @@ public:
     void SetWrap(int32_t Width);
     bool Advance();
 
-    // N2 tategaki: scripts rotate the text texture 90 deg. When that
-    // happens, re-render with glyphs pre-rotated so characters end up
-    // upright. ForceHorizontal suppresses it (env NP_TEXT_H).
     void SetVertical(bool V);
-    void Reflow(int32_t W);
-    bool ForceHorizontal = false;
 
     void Request(int32_t State);
 

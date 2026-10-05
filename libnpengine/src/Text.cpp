@@ -77,9 +77,16 @@ void Text::CreateFromXML(const string& XML)
         /* Muramasa's <PRE> text doesn't fit the grammar; strip markup and
            render it as one plain line instead of dying. */
         string Plain;
-        bool InAngle = false, InSquare = false;
+        bool InAngle = false, InSquare = false, InScript = false;
         for (char c : XML)
         {
+            if (InScript)
+            {
+                if (c == '}')
+                    InScript = false;
+                continue;
+            }
+            if (c == '{') { InScript = true; continue; }
             if (c == '<') { InAngle = true; continue; }
             if (InAngle) { if (c == '>') InAngle = false; continue; }
             if (c == '[') { InSquare = true; continue; }
@@ -153,13 +160,6 @@ bool Text::Advance()
         sVoiceMgr.SetVoice(CurrLine.VoiceAttrs[TextParser::ATTR_SRC]);
     Index++;
     return true;
-}
-
-void Text::Reflow(int32_t W)
-{
-    LayoutWidth = W;
-    if (!CurString.empty())
-        SetString(CurString);
 }
 
 void Text::SetVertical(bool V)

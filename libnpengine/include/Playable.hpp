@@ -43,6 +43,8 @@ public:
     int32_t RemainTime();
     int32_t DurationTime();
     int32_t PassageTime();
+    void DeferFastForwardPlay() { DeferredFastForwardPlay = true; }
+    void ClearDeferredFastForwardPlay() { DeferredFastForwardPlay = false; }
     void OnEOS() { }
     void Request(int32_t State);
     virtual bool Action();
@@ -50,8 +52,9 @@ public:
 
 protected:
     Playable() : Vorbis(nullptr), Stream(nullptr), Playing(false), Loop(false),
-                 Gain(1.f), DurationMs(0), DecodedSamples(0), LoopBeginMs(0),
-                 LoopEndMs(0), SampleRate(0), Channels(0), PlayStartTicks(0), IsBGM(false) { }
+                 DeferredFastForwardPlay(false), Gain(1.f), DurationMs(0),
+                 DecodedSamples(0), LoopBeginMs(0), LoopEndMs(0), SampleRate(0),
+                 Channels(0), PlayStartTicks(0), IsBGM(false) { }
 
     // Decodes more audio into the conversion stream. Called from the mixer.
     void FeedStream();
@@ -62,6 +65,7 @@ protected:
     SDL_AudioStream* Stream;
     bool Playing;
     bool Loop;
+    bool DeferredFastForwardPlay;
     float Gain;
     int32_t DurationMs;
     uint64_t DecodedSamples;

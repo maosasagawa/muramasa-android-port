@@ -46,6 +46,147 @@
 #define NSB_ERROR(MSG1, MSG2) cout << __PRETTY_FUNCTION__ << ": " << MSG1 << " " << MSG2 << endl;
 #define NSB_VARARGS 0xFF
 
+namespace
+{
+bool IsMenuVisibilityVariable(const string& Name)
+{
+    static const set<string> Variables =
+    {
+        "$SYSTEM_menu_enable",
+        "$SYSTEM_menu_save_enable",
+        "$SYSTEM_menu_load_enable",
+        "$SYSTEM_menu_config_enable",
+        "$SYSTEM_backlog_enable",
+        "$SYSTEM_backselect_enable",
+        "$SYSTEM_menu_close_enable",
+        "$SYSTEM_reset_enable"
+    };
+    return Variables.count(Name) != 0;
+}
+
+bool IsDialogueWindowTexture(const string& Name)
+{
+    static const set<string> Textures =
+    {
+        "boxH", "boxTH", "boxCC", "boxCT", "boxRR", "boxRT", "boxLL", "boxLT"
+    };
+    return Textures.count(Name) != 0;
+}
+
+bool IsHorizontalTypeBegin(const string& Symbol)
+{
+    size_t SideIndex = 9;
+    if (Symbol.compare(0, 13, "TypeBeginTime") == 0)
+        SideIndex = 13;
+    else if (Symbol.compare(0, 10, "TypeBeginA") == 0)
+        SideIndex = 10;
+    else if (Symbol.compare(0, 9, "TypeBegin") != 0)
+        return false;
+
+    return Symbol.size() > SideIndex && Symbol[SideIndex] == 'H';
+}
+
+char GetTypeBeginSide(const string& Symbol)
+{
+    if (Symbol.compare(0, 10, "TypeBeginA") == 0)
+        return 'C';
+
+    size_t SideIndex = Symbol.compare(0, 13, "TypeBeginTime") == 0 ? 13 : 9;
+    return Symbol.size() > SideIndex ? Symbol[SideIndex] : 'C';
+}
+
+bool ResolveFunction(NSBContext* Context, const string& Symbol)
+{
+    ScriptFile* pScript = Context->GetScript();
+    if (pScript && pScript->GetSymbol(Symbol) != NSB_INVALIDE_LINE)
+        return true;
+    uint32_t CodeLine;
+    return sResourceMgr->ResolveSymbol(Symbol, CodeLine) != nullptr;
+}
+
+bool IsTypeBeginSuffix(const string& Suffix)
+{
+    return Suffix == "I" || Suffix == "O" || Suffix == "IO" || Suffix == "IFO";
+}
+
+bool GetHorizontalRedirect(const string& Symbol, string& Target, bool& DropLast, bool& AppendEmpty)
+{
+    static const map<string, string> Direct =
+    {
+        {"SetTextEXC", "SetTextEXH"},
+        {"SetTextEXR", "SetTextEXH"},
+        {"SetTextEXL", "SetTextEXH"},
+        {"SetTextA", "SetTextEXAH"},
+        {"SetFwC", "SetFwH"},
+        {"SetFwR", "SetFwH"},
+        {"SetFwL", "SetFwH"},
+        {"SetNwC", "SetFwH"},
+        {"SetNwR", "SetFwH"},
+        {"SetNwL", "SetFwH"},
+        {"FwC", "FwH"},
+        {"FwR", "FwH"},
+        {"FwL", "FwH"},
+        {"NwC", "NwH"},
+        {"NwR", "NwH"},
+        {"NwL", "NwH"},
+        {"FadeFwC", "FadeFwH"},
+        {"FadeFwR", "FadeFwH"},
+        {"FadeFwL", "FadeFwH"},
+        {"DeleteFwC", "DeleteFwH"},
+        {"DeleteFwR", "DeleteFwH"},
+        {"DeleteFwL", "DeleteFwH"}
+    };
+    auto Match = Direct.find(Symbol);
+    if (Match != Direct.end())
+    {
+        Target = Match->second;
+        DropLast = Symbol == "FwC";
+        AppendEmpty = Symbol == "SetNwC" || Symbol == "SetNwR" || Symbol == "SetNwL";
+        return true;
+    }
+
+    const string TimePrefix = "TypeBeginTime";
+    if (Symbol.compare(0, TimePrefix.size(), TimePrefix) == 0 &&
+        Symbol.size() > TimePrefix.size() + 1 &&
+        (Symbol[TimePrefix.size()] == 'C' || Symbol[TimePrefix.size()] == 'R' ||
+         Symbol[TimePrefix.size()] == 'L'))
+    {
+        string Suffix = Symbol.substr(TimePrefix.size() + 1);
+        if (IsTypeBeginSuffix(Suffix))
+        {
+            Target = TimePrefix + "H" + Suffix;
+            return true;
+        }
+    }
+
+    const string Prefix = "TypeBegin";
+    if (Symbol.compare(0, Prefix.size(), Prefix) == 0 &&
+        Symbol.size() > Prefix.size() + 1 &&
+        (Symbol[Prefix.size()] == 'C' || Symbol[Prefix.size()] == 'R' ||
+         Symbol[Prefix.size()] == 'L'))
+    {
+        string Suffix = Symbol.substr(Prefix.size() + 1);
+        if (IsTypeBeginSuffix(Suffix))
+        {
+            Target = Prefix + "H" + Suffix;
+            return true;
+        }
+    }
+
+    const string AllPrefix = "TypeBeginA";
+    if (Symbol.compare(0, AllPrefix.size(), AllPrefix) == 0)
+    {
+        string Suffix = Symbol.substr(AllPrefix.size());
+        if (Suffix == "I" || Suffix == "O" || Suffix == "IO")
+        {
+            Target = AllPrefix + "H" + Suffix;
+            return true;
+        }
+    }
+    return false;
+}
+}
+
 static void LogMissingScrollbar(const string& Handle)
 {
     static set<string> LoggedHandles;
@@ -426,7 +567,66 @@ void NSBInterpreter::FunctionDeclaration()
 
 void NSBInterpreter::CallFunction()
 {
-    CallFunction_(pContext, pContext->GetParam(0));
+    string Symbol = pContext->GetParam(0);
+    bool DropLast = false;
+    bool AppendEmpty = false;
+    string Target;
+    if (HorizontalText() && GetHorizontalRedirect(Symbol, Target, DropLast, AppendEmpty) &&
+        ResolveFunction(pContext, "function." + Target))
+    {
+        if (getenv("NP_FUNC_DBG"))
+            fprintf(stderr, "[function-redirect] %s -> %s\n", Symbol.c_str(), Target.c_str());
+        if (DropLast)
+            Params.DropTop();
+        if (AppendEmpty)
+            Params.PushString("");
+        Symbol = Target;
+    }
+
+    if (Symbol.compare(0, 7, "SetText") == 0)
+    {
+        bool Horizontal = !Symbol.empty() && Symbol.back() == 'H';
+        if (HasLastTextOrientation && LastTextHorizontal != Horizontal)
+        {
+            SetTextOrientation(Horizontal);
+            TextOrientationTransitionPending = true;
+        }
+        HasLastTextOrientation = true;
+        LastTextHorizontal = Horizontal;
+    }
+
+    if (Symbol.compare(0, 9, "TypeBegin") == 0)
+        LastTextWindowSymbol = Symbol;
+
+    if (TextOrientationTransitionPending && Symbol.compare(0, 9, "TypeBegin") == 0)
+    {
+        bool Once = Symbol.compare(0, 13, "TypeBeginOnce") == 0;
+        if (!Once)
+        {
+            string Box;
+            if (IsHorizontalTypeBegin(Symbol))
+                Box = GetBool("$FwH_text_Window") ? "@boxTH" : "@boxH";
+            else
+            {
+                char Side = GetTypeBeginSide(Symbol);
+                string Prefix(1, Side == 'R' || Side == 'L' ? Side : 'C');
+                Box = GetBool("$Fw" + Prefix + "_text_Window") ?
+                    "@box" + Prefix + "T" : "@box" + Prefix + "C";
+            }
+            ObjectHolder.Execute(Box, [](Object** ppObject)
+            {
+                if (Texture* pTexture = dynamic_cast<Texture*>(*ppObject))
+                    pTexture->Fade(0, 1000);
+            });
+        }
+        TextOrientationTransitionPending = false;
+    }
+    if (ReplayTargetRestorePending && Symbol.compare(0, 9, "TypeBegin") == 0)
+        RestoreTextWindow(Symbol, true);
+    else if (Symbol.compare(0, 9, "TypeBegin") == 0 &&
+             Symbol.size() >= 3 && Symbol.compare(Symbol.size() - 3, 3, "IFO") == 0)
+        RestoreTextWindow(Symbol, false);
+    CallFunction_(pContext, Symbol);
 }
 
 void NSBInterpreter::CallScene()
@@ -1091,10 +1291,174 @@ void NSBInterpreter::OnVariableChanged(const string& Name)
     {
         if (getenv("NP_TEX_DBG"))
             fprintf(stderr, "[tex-mode] horizontal=%d\n", HorizontalText());
-        RelayoutTextWindows();
     }
-    else if (Name == "$SYSTEM_menu_config_enable" && !GetBool("$SYSTEM_menu_config_enable"))
+
+    if (IsMenuVisibilityVariable(Name))
+        UpdateDialogueTextVisibility();
+    if (Name == "$SYSTEM_menu_config_enable" && !GetBool("$SYSTEM_menu_config_enable"))
         SaveGlobals();
+}
+
+void NSBInterpreter::SetTextOrientation(bool Horizontal)
+{
+    if (getenv("NP_TEX_DBG"))
+        fprintf(stderr, "[tex-mode] orientation transition horizontal=%d\n", Horizontal);
+
+    auto Fade = [this](const string& Handle)
+    {
+        ObjectHolder.Execute(Handle, [](Object** ppObject)
+        {
+            if (Texture* pTexture = dynamic_cast<Texture*>(*ppObject))
+                pTexture->Fade(0, 0);
+        });
+    };
+
+    if (Horizontal)
+    {
+        for (const string Handle : {"@boxCC", "@boxCT", "@boxRR", "@boxRT", "@boxLL", "@boxLT",
+                                    "@FwC*", "@FwR*", "@FwL*"})
+            Fade(Handle);
+        for (const string Name : {"$FwC_text_Window", "$FwC_text_Window_begin",
+                                  "$FwR_text_Window", "$FwR_text_Window_begin",
+                                  "$FwL_text_Window", "$FwL_text_Window_begin"})
+            SetString(Name, "false");
+    }
+    else
+    {
+        for (const string Handle : {"@boxH", "@boxTH", "@FwH*"})
+            Fade(Handle);
+        SetString("$FwH_text_Window", "false");
+        SetString("$FwH_text_Window_begin", "false");
+    }
+}
+
+void NSBInterpreter::RestoreTextWindow(const string& Symbol, bool Replay)
+{
+    if (Replay)
+        ReplayTargetRestorePending = false;
+    if (Symbol.compare(0, 13, "TypeBeginOnce") == 0)
+        return;
+
+    auto Fade = [this](const string& Handle, int32_t Opacity)
+    {
+        ObjectHolder.Execute(Handle, [Opacity](Object** ppObject)
+        {
+            if (Texture* pTexture = dynamic_cast<Texture*>(*ppObject))
+                pTexture->Fade(0, Opacity);
+        });
+    };
+
+    bool HasFace;
+    string Box;
+    string Face;
+    if (IsHorizontalTypeBegin(Symbol))
+    {
+        HasFace = GetBool("$FwH_text_Window");
+        Box = HasFace ? "@boxTH" : "@boxH";
+        Face = "@FwH*";
+        for (const char* Handle : {"@boxCC", "@boxCT", "@boxRR", "@boxRT",
+                                   "@boxLL", "@boxLT", "@FwC*", "@FwR*", "@FwL*"})
+            Fade(Handle, 0);
+        Fade(Face, 0);
+        Fade(HasFace ? "@boxH" : "@boxTH", 0);
+    }
+    else
+    {
+        char Side = GetTypeBeginSide(Symbol);
+        string Prefix(1, Side == 'R' || Side == 'L' ? Side : 'C');
+        HasFace = GetBool("$Fw" + Prefix + "_text_Window");
+        Box = "@box" + Prefix + (HasFace ? "T" : "C");
+        Face = "@Fw" + Prefix + "*";
+        for (const char* Handle : {"@boxH", "@boxTH", "@FwH*"})
+            Fade(Handle, 0);
+        for (const string Handle : {"@boxCC", "@boxCT", "@boxRR", "@boxRT",
+                                    "@boxLL", "@boxLT", "@FwC*", "@FwR*", "@FwL*"})
+            Fade(Handle, Handle == Box || (HasFace && Handle == Face) ? 1000 : 0);
+    }
+
+    if (Symbol.find('H') != string::npos)
+        Fade(Box, 1000);
+    if (HasFace)
+        Fade(Face, 1000);
+
+    if (getenv("NP_TEX_DBG"))
+    {
+        if (Replay)
+            fprintf(stderr, "[load] restore text window symbol=%s box=%s face=%s\n",
+                    Symbol.c_str(), Box.c_str(), HasFace ? Face.c_str() : "none");
+        else
+            fprintf(stderr, "[text-window] menu restore symbol=%s box=%s face=%s\n",
+                    Symbol.c_str(), Box.c_str(), HasFace ? Face.c_str() : "none");
+    }
+}
+
+void NSBInterpreter::UpdateDialogueTextVisibility()
+{
+    bool MenuOpen = GetBool("$SYSTEM_menu_enable") ||
+                    GetBool("$SYSTEM_menu_save_enable") ||
+                    GetBool("$SYSTEM_menu_load_enable") ||
+                    GetBool("$SYSTEM_menu_config_enable") ||
+                    GetBool("$SYSTEM_backlog_enable") ||
+                    GetBool("$SYSTEM_backselect_enable") ||
+                    GetBool("$SYSTEM_menu_close_enable") ||
+                    GetBool("$SYSTEM_reset_enable");
+    bool MenuOpened = !DialogueMenuWasOpen && MenuOpen;
+    bool MenuClosed = DialogueMenuWasOpen && !MenuOpen;
+
+    if (MenuOpened)
+    {
+        MenuTextureOpacities.clear();
+        function<void(ObjectHolder_t*)> CaptureTextures = [&](ObjectHolder_t* Holder)
+        {
+            Holder->ForEachObject([&](Object* pObject)
+            {
+                if (Texture* pTexture = dynamic_cast<Texture*>(pObject))
+                    if (!pTexture->DebugName.empty() &&
+                        !IsDialogueWindowTexture(pTexture->DebugName))
+                        MenuTextureOpacities[pTexture->DebugName] = pTexture->GetOpacity();
+                if (pObject)
+                    CaptureTextures(pObject);
+            });
+        };
+        CaptureTextures(&ObjectHolder);
+        MenuTextureSnapshotCaptured = true;
+        if (getenv("NP_TEX_DBG"))
+            fprintf(stderr, "[text-window] menu snapshot textures=%zu\n", MenuTextureOpacities.size());
+    }
+
+    DialogueMenuWasOpen = MenuOpen;
+
+    if (MenuClosed)
+    {
+        if (MenuTextureSnapshotCaptured)
+            for (const auto& Entry : MenuTextureOpacities)
+                if (Texture* pTexture = dynamic_cast<Texture*>(ObjectHolder.Read(Entry.first)))
+                    pTexture->Fade(0, Entry.second);
+        if (getenv("NP_TEX_DBG"))
+            fprintf(stderr, "[text-window] menu restore symbol=%s textures=%zu\n",
+                    LastTextWindowSymbol.c_str(), MenuTextureOpacities.size());
+        MenuTextureOpacities.clear();
+        MenuTextureSnapshotCaptured = false;
+    }
+
+    if (Variable* pHandle = VariableHolder.Read("$SYSTEM_present_text"))
+    {
+        string Handle = pHandle->ToString();
+        if (!Handle.empty())
+            if (Text* pText = Get<Text>(Handle))
+            {
+                if (getenv("NP_TEX_DBG"))
+                    fprintf(stderr, "[text-layer] handle=%s priority=%d menu=%d\n",
+                            Handle.c_str(), pText->GetPriority(), MenuOpen);
+                if (MenuOpen)
+                    pText->Fade(0, 0);
+                else
+                    pText->Fade(0, 1000);
+            }
+    }
+
+    if (MenuClosed && !LastTextWindowSymbol.empty())
+        RestoreTextWindow(LastTextWindowSymbol, false);
 }
 
 void NSBInterpreter::SetVar(const string& Name, Variable* pVar)
@@ -1196,12 +1560,10 @@ void NSBInterpreter::CreateTexture()
     int32_t TargetX = X(pTexture->GetWidth());
     int32_t TargetY = Y(pTexture->GetHeight());
     pTexture->Move(TargetX, TargetY);
+    if (Handle.rfind("me", 0) == 0 && Priority < 30000)
+        Priority = 30000;
     pTexture->SetPriority(Priority);
-    pTexture->SourceFile = Source;
-    pTexture->OrigX = TargetX;
-    pTexture->OrigY = TargetY;
     pTexture->DebugName = Handle;
-    ApplyTextWindowMode(pTexture);
 
     if (getenv("NP_TEX_DBG"))
         fprintf(stderr, "[tex] CreateTexture %s src=%s prio=%d size=%dx%d pos=%d,%d\n",
@@ -1210,57 +1572,6 @@ void NSBInterpreter::CreateTexture()
                 pTexture->GetMX(), pTexture->GetMY());
     pWindow->AddTexture(pTexture);
     ObjectHolder.Write(Handle, pTexture);
-}
-
-void NSBInterpreter::ReloadTexture(Texture* pTexture, const string& Source)
-{
-    if (Source.size() >= 4 && Source[Source.size() - 4] == '.')
-        pTexture->CreateFromFile(Source);
-}
-
-void NSBInterpreter::ApplyTextWindowMode(Texture* pTexture)
-{
-    if (!pTexture || pTexture->SourceFile.empty())
-        return;
-
-    string Low = pTexture->SourceFile;
-    transform(Low.begin(), Low.end(), Low.begin(), [](unsigned char c) { return tolower(c); });
-    string Replacement;
-    if (Low.size() >= 18 && Low.compare(Low.size() - 17, 17, "textwindow_fw.png") == 0 &&
-        Low[Low.size() - 18] != 'h')
-        Replacement = pTexture->SourceFile.substr(0, pTexture->SourceFile.size() - 17) + "THTextWindow_Fw.png";
-    else if (Low.size() >= 15 && Low.compare(Low.size() - 14, 14, "textwindow.png") == 0 &&
-             Low[Low.size() - 15] != 'h')
-        Replacement = pTexture->SourceFile.substr(0, pTexture->SourceFile.size() - 14) + "THTextWindow.png";
-    else
-        return;
-
-    if (HorizontalText() && !pTexture->Remapped)
-    {
-        ReloadTexture(pTexture, Replacement);
-        pTexture->Move(Low.find("textwindow_fw.png") != string::npos ? 224 : 264, 446);
-        pTexture->Remapped = true;
-    }
-    else if (!HorizontalText() && pTexture->Remapped)
-    {
-        ReloadTexture(pTexture, pTexture->SourceFile);
-        pTexture->Move(pTexture->OrigX, pTexture->OrigY);
-        pTexture->Remapped = false;
-    }
-
-    if (getenv("NP_TEX_DBG"))
-        fprintf(stderr, "[tex-mode] handle=%s horizontal=%d remapped=%d src=%s pos=%d,%d\n",
-                pTexture->DebugName.c_str(), HorizontalText(), pTexture->Remapped,
-                pTexture->SourceFile.c_str(), pTexture->GetMX(), pTexture->GetMY());
-}
-
-void NSBInterpreter::RelayoutTextWindows()
-{
-    ObjectHolder.ForEachTopLevel([this](Object* pObject)
-    {
-        if (Texture* pTexture = dynamic_cast<Texture*>(pObject))
-            ApplyTextWindowMode(pTexture);
-    });
 }
 
 void NSBInterpreter::ImageHorizon()
@@ -1469,9 +1780,15 @@ void NSBInterpreter::Request()
     ObjectHolder.Execute(Handle, [this, Request] (Object** ppObject)
     {
         if (Object* pObject = *ppObject)
-            if (!pContext->FastForward || !dynamic_cast<Playable*>(pObject) ||
-                dynamic_cast<Playable*>(pObject)->IsBGM)
-            pObject->Request(Request);
+        {
+            Playable* pPlayable = dynamic_cast<Playable*>(pObject);
+            if (!pContext->FastForward || !pPlayable || pPlayable->IsBGM)
+                pObject->Request(Request);
+            else if (Request == Nsb::PLAY || Request == Nsb::RESUME)
+                pPlayable->DeferFastForwardPlay();
+            else
+                pPlayable->ClearDeferredFastForwardPlay();
+        }
     });
 }
 
@@ -1521,26 +1838,6 @@ void NSBInterpreter::Move()
         {
             int32_t TX = X(pTexture->GetWidth(), pTexture->GetMX());
             int32_t TY = Y(pTexture->GetHeight(), pTexture->GetMY());
-            Text* pText = dynamic_cast<Text*>(pTexture);
-            if (HorizontalText())
-            {
-                string Source = pTexture->SourceFile;
-                transform(Source.begin(), Source.end(), Source.begin(), [](unsigned char c) { return tolower(c); });
-                if (Source.find("fw/") != string::npos &&
-                    pTexture->GetWidth() == 122 && pTexture->GetHeight() == 122)
-                {
-                    TX = 228;
-                    TY = 439;
-                }
-                else if (pText && pText->ForceHorizontal)
-                {
-                    bool FW = GetBool("$FwC_text_Window") || GetBool("$FwL_text_Window") ||
-                              GetBool("$FwR_text_Window") || GetBool("$FwH_text_Window");
-                    TX = FW ? 365 : 286;
-                    TY = 453;
-                    pText->Reflow(FW ? 500 : 520);
-                }
-            }
             if (pContext->FastForward)
                 Time = 0;
             pTexture->Move(TX, TY, Time, Tempo);
@@ -1742,6 +2039,9 @@ void NSBInterpreter::CreateSound()
     Playable* pPlayable = new Playable(Res);
     pPlayable->IsBGM = Type == "BGM";
     pPlayable->SetVolume(0, Volume, -1);
+    if (getenv("NP_SND_DBG"))
+        fprintf(stderr, "[snd] create handle=%s type=%s file=%s playable=%p\n",
+                Handle.c_str(), Type.c_str(), File.c_str(), (void*)pPlayable);
     ObjectHolder.Write(Handle, pPlayable);
 }
 
@@ -1906,6 +2206,7 @@ void NSBInterpreter::ParseText()
     Text* pText = new Text;
     pText->CreateFromXML(XML);
     Handle = Box + "/" + Handle;
+    pText->DebugName = Handle;
     int32_t TextIndex = GetInt("$SYSTEM_present_text_index") + 1;
     SetInt("$SYSTEM_present_text_index", TextIndex);
     if (pContext->FastForward && Handle == ReplayTarget &&
@@ -1915,6 +2216,7 @@ void NSBInterpreter::ParseText()
             fprintf(stderr, "[load] replay target handle=%s index=%d\n",
                     Handle.c_str(), TextIndex);
         pContext->FastForward = false;
+        ReplayTargetRestorePending = true;
     }
     SetString("$SYSTEM_present_text", Handle);
     ObjectHolder.Write(Handle, pText);
@@ -1934,10 +2236,11 @@ void NSBInterpreter::LoadText()
     {
         pText->SetColor(Text::dInColor);
         pText->SetCharacterSize(Text::dSize);
-        pText->SetPriority(0xFFFF); // [HACK]
+        pText->SetPriority(20002);
         pText->SetWrap(Width);
         pText->Advance();
         pWindow->AddTexture(pText);
+        UpdateDialogueTextVisibility();
     }
 }
 
@@ -2241,6 +2544,10 @@ void NSBInterpreter::Load()
     if (!pData)
         return;
     Npa::Buffer SaveData(NpaFile::Decrypt(pData, Size), Size);
+    LastTextWindowSymbol.clear();
+    DialogueMenuWasOpen = false;
+    MenuTextureSnapshotCaptured = false;
+    MenuTextureOpacities.clear();
     RestoreVariables(SaveData, false);
     string Target = GetString("$SYSTEM_present_text");
     ReplayTargetTextIndex = GetInt("$SYSTEM_present_text_index");
@@ -2280,6 +2587,9 @@ void NSBInterpreter::Load()
     pContext->Reset();
     pContext->FastForward = true;
     ReplayTarget = Target;
+    ReplayTargetRestorePending = false;
+    HasLastTextOrientation = false;
+    TextOrientationTransitionPending = false;
     if (pBootScript)
         pContext->Call(pBootScript, "chapter.main");
 }
@@ -2432,14 +2742,7 @@ void NSBInterpreter::Rotate()
         {
             bool Tategaki = Text::dAlign.find("DOWN") != string::npos ||
                             Text::dAlign.find("down") != string::npos;
-            if (Tategaki && HorizontalText())
-            {
-                // Horizontal-text mode: suppress the tategaki rotation.
-                pText->SetVertical(false);
-                pText->ForceHorizontal = true;
-                Target = 0;
-            }
-            else if (Tategaki)
+            if (Tategaki)
                 pText->SetVertical(((Target % 180) + 180) % 180 == 90);
         }
         if (pContext->FastForward)

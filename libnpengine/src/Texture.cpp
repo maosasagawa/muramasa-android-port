@@ -34,8 +34,6 @@ Angle(0),
 XScale(1000), YScale(1000),
 XShake(0), YShake(0), ShakeTime(0), ShakeTick(false)
 {
-    OrigX = OrigY = 0;
-    Remapped = false;
 }
 
 Texture::~Texture()
@@ -230,6 +228,11 @@ int32_t Texture::RemainFade()
 }
 
 int32_t Texture::DebugAlpha()
+{
+    return GetOpacity();
+}
+
+int32_t Texture::GetOpacity()
 {
     return pFade ? pFade->GetAlpha() : 1000;
 }

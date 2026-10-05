@@ -60,6 +60,20 @@ public:
         return Params[ReadIndex++];
     }
 
+    void DropTop()
+    {
+        if (!WriteIndex)
+            return;
+        Variable::Destroy(Params[--WriteIndex]);
+        if (ReadIndex > WriteIndex)
+            ReadIndex = WriteIndex;
+    }
+
+    void PushString(const string& Str)
+    {
+        Push(Variable::MakeString(Str));
+    }
+
     void Begin(size_t Size)
     {
         WriteIndex -= Size;
@@ -297,6 +311,9 @@ protected:
     Variable* GetVar(const string& Name);
     Object* GetObject(const string& Name);
     template <class T> T* Get(const string& Name);
+    void SetTextOrientation(bool Horizontal);
+    void RestoreTextWindow(const string& Symbol, bool Replay);
+    void UpdateDialogueTextVisibility();
     void CallFunction_(NSBContext* pThread, const string& Symbol);
     void CallScriptSymbol(const string& Prefix);
     void CallScript(const string& Filename, const string& Symbol);
@@ -309,9 +326,6 @@ protected:
     void ProcessKey(int Key, const string& Val);
     void ProcessButton(int button, const string& Val);
     void RestoreVariables(Npa::Buffer& SaveData, bool GlobalsOnly);
-    void ApplyTextWindowMode(Texture* pTexture);
-    void RelayoutTextWindows();
-    void ReloadTexture(Texture* pTexture, const string& Source);
 
     void DebuggerMain();
     void Inspect(int32_t n);
@@ -343,6 +357,14 @@ protected:
     string ReplayTarget;
     string ReplayGameName;
     int32_t ReplayTargetTextIndex = 0;
+    bool ReplayTargetRestorePending = false;
+    string LastTextWindowSymbol;
+    bool DialogueMenuWasOpen = false;
+    bool MenuTextureSnapshotCaptured = false;
+    map<string, int32_t> MenuTextureOpacities;
+    bool HasLastTextOrientation = false;
+    bool LastTextHorizontal = false;
+    bool TextOrientationTransitionPending = false;
 };
 
 template <class T> T* NSBInterpreter::Get(const string& Name)
