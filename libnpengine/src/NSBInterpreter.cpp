@@ -100,6 +100,18 @@ char GetTypeBeginSide(const string& Symbol)
     return Symbol.size() > SideIndex ? Symbol[SideIndex] : 'C';
 }
 
+void LogFaceDebug(const char* Event, const string& Name, const string& Value)
+{
+    fprintf(stderr, "[face-debug] %s name=%s value=%s name-bytes=", Event,
+            Name.c_str(), Value.c_str());
+    for (unsigned char Byte : Name)
+        fprintf(stderr, "%02x", Byte);
+    fprintf(stderr, " value-bytes=");
+    for (unsigned char Byte : Value)
+        fprintf(stderr, "%02x", Byte);
+    fputc('\n', stderr);
+}
+
 bool ResolveFunction(NSBContext* Context, const string& Symbol)
 {
     ScriptFile* pScript = Context->GetScript();
@@ -987,10 +999,13 @@ void NSBInterpreter::Literal()
     const string& Val = pContext->GetParam(1);
     if (Type == "STRING")
     {
-        if (Variable* pVar = VariableHolder.Read(Val))
-            PushVar(pVar);
-        else
-            PushString(Val);
+        if (!Val.empty())
+            if (Variable* pVar = VariableHolder.Read(Val))
+            {
+                PushVar(pVar);
+                return;
+            }
+        PushString(Val);
     }
     else if (Type == "INT")
         PushInt(stoi(Val));
@@ -1754,6 +1769,19 @@ void NSBInterpreter::CreateTexture()
     NSBPosition X = PopPos();
     NSBPosition Y = PopPos();
     string Source = PopString();
+
+    if (getenv("NP_FACE_DBG") && Source.rfind("cg/fw/nw", 0) == 0)
+    {
+        LogFaceDebug("create-handle", "", Handle);
+        LogFaceDebug("create-source", "", Source);
+        const vector<string> FaceVariables = { "$FwCName", "$FwHName", "$ナット名" };
+        for (const string& Name : FaceVariables)
+        {
+            Variable* pVar = VariableHolder.Read(Name);
+            LogFaceDebug("create-variable", Name,
+                         pVar ? pVar->ToString() : string("<missing>"));
+        }
+    }
 
     Texture* pTexture = new Texture;
     if (Source == "VIDEO")
