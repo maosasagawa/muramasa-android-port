@@ -16,5 +16,7 @@
 **/voice/**
 **/bgm/**
 android/app/src/main/jniLibs/**/*.so
+android/app/app/src/main/assets/gamedata/
+android/app/app/src/main/assets/gamedata-manifest.txt
 deps/
 dist/

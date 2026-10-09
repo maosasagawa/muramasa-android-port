@@ -53,6 +53,10 @@ android {
     lint {
         abortOnError false
     }
+    // Game archives are already compressed/encoded; storing them keeps packaging fast.
+    aaptOptions {
+        noCompress 'npa', 'nss', 'ngs', 'ogg', 'ttc', 'npf'
+    }
 
     if (buildAsLibrary) {
         libraryVariants.all { variant ->

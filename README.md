@@ -14,7 +14,7 @@
 ## 下载与安装
 
 1. 到本仓库 [Releases](https://github.com/maosasagawa/muramasa-android-port/releases) 下载 `muramasa-android-v*.apk`（同时包含 arm64-v8a 与 x86_64，debug 签名），或在 [Actions](https://github.com/maosasagawa/muramasa-android-port/actions) 中下载每次提交构建的 APK。
-2. 把自己正版游戏目录（含全部 `.npa` 与散文件）复制到下方目录。
+2. 首选：把自己正版游戏目录（含全部 `.npa` 与散文件）复制到手机内部存储的 `Muramasa/` 目录（`cg.npa` 直接放在该目录内），并在首次启动时按提示授予“所有文件访问权限”。也可复制到 `Android/data/org.devin.muramasa/files/game/`。
 3. 如需在游戏「设置」中切换横排/竖排，先用 `scripts/apply_script_patches.sh` 生成打过补丁的 `sys_config.nss` 放进游戏目录；不打补丁也能运行，只是设置界面没有「文字方向」一项。
 
 ## 当前进度
@@ -44,9 +44,10 @@
 
 `.github/workflows/android.yml` 在每次推送到 `main`、PR 和手动触发时用 NDK r25c 从源码编译 SDL2、libpng、libjpeg-turbo 和引擎，生成 APK 并上传为 Actions 构建产物。推送 `v*` 标签（如 `git tag v0.1.0 && git push origin v0.1.0`）时自动创建 GitHub Release 并附上 APK。CI 不接触任何游戏数据。
 
-游戏数据安装目录：
+游戏数据安装目录（首选目录；也可使用应用专属目录）：
 
 ```text
+/storage/emulated/0/Muramasa
 /sdcard/Android/data/org.devin.muramasa/files/game
 ```
 
@@ -100,4 +101,4 @@ APK 输出位于 `android/app/app/build/outputs/apk/debug/`。`scripts/build_and
 
 ## English summary
 
-An engine-level Android port of Nitroplus N2 for *Full Metal Daemon Muramasa*, based on FGRE `libnpa`, `libnpengine`, and `muramasa`, with NitroSharp as a reference. Game data is not included; users must own the game. Install it under `/sdcard/Android/data/org.devin.muramasa/files/game`. Video playback is not supported. See the Chinese sections above for build steps and licensing notes.
+An engine-level Android port of Nitroplus N2 for *Full Metal Daemon Muramasa*, based on FGRE `libnpa`, `libnpengine`, and `muramasa`, with NitroSharp as a reference. Game data is not included; users must own the game. Install it in shared storage at `/storage/emulated/0/Muramasa` (grant all-files access on first launch), or under `/sdcard/Android/data/org.devin.muramasa/files/game`. Video playback is not supported. See the Chinese sections above for build steps and licensing notes.

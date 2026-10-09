@@ -42,10 +42,13 @@ void WriteFileDirectory(const string& Filename, const char* pData, uint32_t Size
     {
         do
         {
-            *delim = 0;
-            if (!Exists(Path))
-                CreateDirectory(Path);
-            *delim = '/';
+            if (delim != Path.c_str())
+            {
+                *delim = 0;
+                if (!Exists(Path))
+                    CreateDirectory(Path);
+                *delim = '/';
+            }
         } while ((delim = strchr(delim + 1, '/')));
     }
 
