@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.18)
-project(muramasa_android CXX)
+project(muramasa_android C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2 -Wall -fvisibility=default")
@@ -28,7 +28,8 @@ file(GLOB NPA_SRC ${NPA}/src/*.cpp)
 file(GLOB NPE_SRC ${NPE}/src/*.cpp)
 file(GLOB MURA_SRC ${MURA}/src/*.cpp)
 
-add_library(main SHARED ${NPA_SRC} ${NPE_SRC} ${MURA_SRC})
+add_library(main SHARED ${NPA_SRC} ${NPE_SRC} ${MURA_SRC}
+    ${NPE}/src/plm/pl_mpeg_impl.c)
 
 add_library(SDL2 SHARED IMPORTED)
 set_target_properties(SDL2 PROPERTIES IMPORTED_LOCATION ${XLIBS}/lib/libSDL2.so)

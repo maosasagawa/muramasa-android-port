@@ -38,6 +38,11 @@ bool DeviceFailed = false;
 std::vector<Playable*> Active;
 }
 
+// Accessors for non-Playable audio producers (Movie feeds its own stream).
+int PlayableDevRate() { return DevRate; }
+int PlayableDevChannels() { return DevChannels; }
+bool PlayableHasDevice() { return Device != 0; }
+
 void AudioCallback(void* Data, uint8_t* Out, int Len)
 {
     memset(Out, 0, Len);
@@ -243,7 +248,7 @@ void Playable::Play()
     }
     SDL_LockAudioDevice(Device);
     Playing = true;
-    if (Vorbis)
+    if (Vorbis || Stream)
     {
         bool Found = false;
         for (Playable* P : Active)
@@ -260,6 +265,8 @@ void Playable::Play()
 void Playable::FeedStream()
 {
     // Called under the audio device lock.
+    if (!Vorbis)
+        return; // e.g. Movie, which feeds Stream from its own decoder
     const int ChunkFrames = 4096;
     std::vector<int16_t> Buf(ChunkFrames * Channels);
     int Produced = 0;

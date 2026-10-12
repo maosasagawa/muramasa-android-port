@@ -2944,7 +2944,19 @@ void NSBInterpreter::Shake()
 void NSBInterpreter::MoviePlay()
 {
     string File = PopString();
-    /*bool unk = */PopBool();
+    bool Skippable = PopBool();
+
+    Movie* pMovie = new Movie(File, pWindow, 0x7FFFFFFF, false, true);
+    pMovie->AutoHide = true;
+    pMovie->DebugName = File;
+    pWindow->AddTexture(pMovie);
+    pMovie->Play();
+    int32_t Dur = pMovie->DurationTime();
+    if (Dur <= 0)
+        Dur = 0x7FFFFFFF;
+    // Wakes on movie end (TryWake via Playable::Action) or on click when
+    // skippable; Movie::Draw hides itself once every waiter abandons it.
+    pContext->WaitAction(pMovie, Dur, Skippable);
 }
 
 void NSBInterpreter::SetStream()

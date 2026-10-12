@@ -21,7 +21,7 @@ endif()
 message(STATUS "Configuring libnpengine version " ${LIBNPENGINE_VERSION})
 
 # project name and language
-project (libnpengine CXX)
+project (libnpengine C CXX)
 
 set(CMAKE_BUILD_TYPE Debug)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17 -O2 -Wall")
@@ -77,6 +77,7 @@ add_library(npengine SHARED
     src/Object.cpp
     src/Playable.cpp
     src/Movie.cpp
+    src/plm/pl_mpeg_impl.c
     src/Choice.cpp
     src/Text.cpp
     src/Parser.cpp

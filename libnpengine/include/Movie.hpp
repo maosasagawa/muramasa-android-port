@@ -21,9 +21,14 @@
 #include "Playable.hpp"
 #include "Texture.hpp"
 
-// Stub: no video decoder in the portable build. The object keeps the
-// Playable/Texture interface so scripts that create a movie continue
-// normally (they see a zero-duration, invisible texture).
+extern "C" {
+#include "plm/pl_mpeg.h"
+}
+
+// MPEG-1 PS (.ngs) playback via pl_mpeg. Decoding happens on the render
+// thread inside Draw(): plm_decode is fed the frame delta, video frames go
+// to the GL texture and MP2 audio to this object's SDL_AudioStream through
+// Playable's mixing path (Vorbis stays null).
 class Movie : public Playable, public Texture
 {
 public:
@@ -31,9 +36,33 @@ public:
     ~Movie();
 
     virtual void Request(int32_t State) { Playable::Request(State); }
-    void Draw(uint32_t Diff) { }
+    void Draw(uint32_t Diff);
+    void Play();
+    int32_t RemainTime();
+    int32_t DurationTime();
+    int32_t PassageTime();
+    bool HasVideo() const { return Plm != nullptr; }
 private:
+    int32_t MoviePositionMs();
+
+    static void OnVideo(plm_t* Self, plm_frame_t* Frame, void* User);
+    static void OnAudio(plm_t* Self, plm_samples_t* Samples, void* User);
+
     bool Alpha;
+    bool HasAudio;
+public:
+    // MoviePlay-mode: hide and stop as soon as the stream ends or every
+    // waiter context abandoned its wait (click-skip).
+    bool AutoHide;
+private:
+    bool HadWaiter;
+    plm_t* Plm;
+    bool Hidden;
+    std::vector<uint8_t> FrameBuf;
+    int FrameW, FrameH;
+    bool NewFrame;
+    uint64_t PushedSamples;
+    uint32_t WaitTicks;
 };
 
 #endif

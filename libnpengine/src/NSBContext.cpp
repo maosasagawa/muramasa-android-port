@@ -131,14 +131,14 @@ void NSBContext::WaitText(Text* pText, int32_t Time)
     Wait(Time);
 }
 
-void NSBContext::WaitAction(Object* pObject, int32_t Time)
+void NSBContext::WaitAction(Object* pObject, int32_t Time, bool Interrupt)
 {
     if (FastForward)
         return;
     this->pObject = pObject;
     if (pObject)
         pObject->Waiters.push_back(this);
-    Wait(Time);
+    Wait(Time, Interrupt);
 }
 
 void NSBContext::WaitKey(int32_t Time)

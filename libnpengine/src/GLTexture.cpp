@@ -127,7 +127,7 @@ void GLTexture::Create(uint8_t* Pixels, GLenum Format, int W, int H)
     glGenTextures(1, &GLTextureID);
     glBindTexture(GL_TEXTURE_2D, GLTextureID);
     SetSmoothing(false);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, Width, Height, 0, Format, GL_UNSIGNED_BYTE, Pixels);
+    glTexImage2D(GL_TEXTURE_2D, 0, Format, Width, Height, 0, Format, GL_UNSIGNED_BYTE, Pixels);
 }
 
 void GLTexture::SetSmoothing(bool Set)
